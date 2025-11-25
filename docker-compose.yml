@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # Backend API service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: claude-code-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=false
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-foG3jwfG4uIv8dEdTb60l2cHRbKxclMuCcnOCZlVyeJLf3Gf}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic/}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-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}
+      - DATABASE_URL=sqlite+aiosqlite:///./data/app.db
+      - WORKSPACE_BASE_PATH=/app/workspaces
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - CORS_ORIGINS=["http://localhost:5173","http://localhost:3000","http://localhost:80"]
+    volumes:
+      - ./data:/app/data
+      - ./workspaces:/app/workspaces
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - claude-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: claude-code-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - claude-network
+    restart: unless-stopped
+
+  # Workspace base image builder (run once)
+  workspace-builder:
+    build:
+      context: ./docker/workspace
+      dockerfile: Dockerfile
+    image: claude-workspace:latest
+    container_name: claude-workspace-builder
+    command: echo "Workspace image built successfully"
+    profiles:
+      - build
+
+networks:
+  claude-network:
+    driver: bridge
+    name: claude-network
+
+volumes:
+  data:
+  workspaces:
+
