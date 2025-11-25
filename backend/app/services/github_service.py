@@ -195,8 +195,8 @@ class GitHubService:
         
         target.mkdir(parents=True, exist_ok=True)
         
-        # Clone repository
-        clone_kwargs = {"depth": 1}  # Shallow clone for speed
+        # Clone repository (full clone to support push)
+        clone_kwargs = {}
         if branch:
             clone_kwargs["branch"] = branch
         
@@ -233,10 +233,10 @@ class GitHubService:
                     f"https://{self.token}@github.com"
                 )
         
-        # Build git clone command
+        # Build git clone command (full clone to support push)
         # Only specify branch if explicitly provided and not empty
         branch_arg = f"-b {branch}" if branch and branch.strip() else ""
-        git_command = f"git clone --depth 1 {branch_arg} {clone_url} /workspace".strip()
+        git_command = f"git clone {branch_arg} {clone_url} /workspace".strip()
         
         # Execute in container
         exit_code, output = await docker_service.execute_command(

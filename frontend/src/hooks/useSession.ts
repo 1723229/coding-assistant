@@ -31,6 +31,7 @@ interface SessionState {
     selectFile: (path: string) => Promise<void>;
     saveFile: (path: string, content: string) => Promise<void>;
     setCurrentFileContent: (content: string) => void;
+    closeFile: () => void;
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -97,14 +98,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     appendToLastMessage: (text) => {
         set(state => {
-            const messages = [...state.messages];
-            if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
-                messages[messages.length - 1] = {
-                    ...messages[messages.length - 1],
-                    content: messages[messages.length - 1].content + text,
-                };
-            }
-            return { messages };
+            const { messages } = state;
+            if (messages.length === 0) return state;
+            
+            const lastIndex = messages.length - 1;
+            const lastMessage = messages[lastIndex];
+            
+            if (lastMessage.role !== 'assistant') return state;
+            
+            // 只更新最后一条消息，避免重新创建整个数组
+            const updatedMessages = messages.slice(0, -1);
+            updatedMessages.push({
+                ...lastMessage,
+                content: lastMessage.content + text,
+            });
+            
+            return { messages: updatedMessages };
         });
     },
 
@@ -150,6 +159,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         set(state => ({
             currentFile: state.currentFile ? { ...state.currentFile, content } : null,
         }));
+    },
+
+    closeFile: () => {
+        set({ currentFile: null });
     },
 }));
 

@@ -50,16 +50,11 @@ docker --version
 cd backend
 
 # 创建虚拟环境
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate  # Windows: venv\Scripts\activate
 
 # 安装依赖
 pip install -r requirements.txt
-
-# 配置环境变量
-export ANTHROPIC_API_KEY="your-api-key"
-export ANTHROPIC_BASE_URL="https://api.moonshot.cn/anthropic/"
-export GITHUB_TOKEN="your-github-token"
 
 # 启动服务
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -72,10 +67,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 cd frontend
 
 # 安装依赖
-npm install
+npm install pnpm
+
+pnpm install
 
 # 启动开发服务器
-npm run dev
+pnpm run dev
 ```
 
 ### 4. 访问应用

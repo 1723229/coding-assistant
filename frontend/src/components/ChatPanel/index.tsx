@@ -18,7 +18,10 @@ export function ChatPanel() {
     const { isConnected, connect, send, interrupt } = useWebSocketContext();
     const [input, setInput] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
+    const [isStreaming, setIsStreaming] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const lastScrollTimeRef = useRef<number>(0);
 
     // 当 session 变化时，连接 WebSocket
     useEffect(() => {
@@ -44,9 +47,11 @@ export function ChatPanel() {
 
             case 'text':
                 addMessage({ role: 'assistant', content: msg.content });
+                setIsStreaming(false);
                 break;
 
             case 'text_delta':
+                setIsStreaming(true);
                 appendToLastMessage(msg.content);
                 break;
 
@@ -115,6 +120,7 @@ export function ChatPanel() {
 
             case 'response_complete':
                 setIsProcessing(false);
+                setIsStreaming(false);
                 break;
 
             case 'error':
@@ -127,14 +133,28 @@ export function ChatPanel() {
                     metadata: { is_error: true, ...msg.metadata },
                 });
                 setIsProcessing(false);
+                setIsStreaming(false);
                 break;
         }
     }, [addMessage, appendToLastMessage]);
 
-    // 自动滚动到底部
+    // 优化的自动滚动 - 使用节流防止过于频繁的滚动
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+        const now = Date.now();
+        const timeSinceLastScroll = now - lastScrollTimeRef.current;
+
+        // 流式输出时使用节流（每100ms最多滚动一次），其他情况立即滚动
+        const shouldThrottle = isStreaming && timeSinceLastScroll < 100;
+
+        if (!shouldThrottle) {
+            lastScrollTimeRef.current = now;
+            // 流式时使用 auto 行为避免卡顿，其他情况使用 smooth
+            messagesEndRef.current?.scrollIntoView({
+                behavior: isStreaming ? 'auto' : 'smooth',
+                block: 'end'
+            });
+        }
+    }, [messages, isStreaming]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -184,7 +204,10 @@ export function ChatPanel() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-4 scrollbar-thin">
+            <div
+                ref={messagesContainerRef}
+                className="flex-1 overflow-y-auto p-3 space-y-4 scrollbar-thin"
+            >
                 {messages.length === 0 ? (
                     <div className="text-center text-editor-muted text-sm py-8">
                         <p>Start a conversation with Claude</p>
@@ -194,7 +217,11 @@ export function ChatPanel() {
                     </div>
                 ) : (
                     messages.map((msg, idx) => (
-                        <MessageBubble key={idx} message={msg} />
+                        <MessageBubble
+                            key={idx}
+                            message={msg}
+                            isStreaming={isStreaming && idx === messages.length - 1 && msg.role === 'assistant'}
+                        />
                     ))
                 )}
                 <div ref={messagesEndRef} />
@@ -239,7 +266,10 @@ export function ChatPanel() {
     );
 }
 
-function MessageBubble({ message }: { message: Message & { eventType?: string; timestamp?: string; metadata?: any } }) {
+function MessageBubble({ message, isStreaming = false }: {
+    message: Message & { eventType?: string; timestamp?: string; metadata?: any };
+    isStreaming?: boolean;
+}) {
     const isUser = message.role === 'user';
     const isSystem = message.role === 'system';
     const isEvent = message.eventType && ['thinking', 'tool_use', 'tool_result', 'system', 'result', 'error'].includes(message.eventType);
@@ -298,6 +328,10 @@ function MessageBubble({ message }: { message: Message & { eventType?: string; t
                         >
                             {message.content}
                         </ReactMarkdown>
+                        {/* 流式输出时显示闪烁光标 */}
+                        {isStreaming && (
+                            <span className="inline-block w-2 h-4 ml-0.5 bg-editor-accent animate-pulse" />
+                        )}
                     </div>
                 )}
             </div>
