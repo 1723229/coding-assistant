@@ -1,459 +1,290 @@
 """
-GitHub integration REST API.
+GitHub API Router
 
-Provides endpoints for GitHub repository operations.
+GitHub相关的API路由定义
+只负责路由定义，所有业务逻辑在service层
 """
 
-import uuid
 from typing import Optional, List
-from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Query, Path, Body
+from pydantic import BaseModel
 
-from app.db import get_async_db
-from app.db.schemas import (
-    GitHubTokenCreate,
-    GitHubTokenResponse,
-    CloneRepoRequest,
-    CommitRequest,
-    PushRequest,
-    CreateBranchRequest,
-    CreatePRRequest,
-    RepoInfoResponse,
-    FileChangeResponse,
-    PRResponse,
+from app.services import GitHubApiService
+from app.db.schemas import GitHubTokenCreate
+
+# 创建路由器
+github_router = APIRouter(prefix="/github", tags=["github"])
+
+# 创建service实例
+github_service = GitHubApiService()
+
+
+# ===================
+# Request Models
+# ===================
+
+class CloneRepoRequest(BaseModel):
+    repo_url: str
+    branch: Optional[str] = None
+
+
+class CommitRequest(BaseModel):
+    message: str
+    files: Optional[List[str]] = None
+
+
+class PushRequest(BaseModel):
+    branch: Optional[str] = None
+
+
+class CreateBranchRequest(BaseModel):
+    branch_name: str
+    checkout: bool = True
+
+
+class CheckoutBranchRequest(BaseModel):
+    branch_name: str
+
+
+class CreatePRRequest(BaseModel):
+    title: str
+    body: str
+    head_branch: str
+    base_branch: Optional[str] = None
+
+
+# ===================
+# Token Management Routes
+# ===================
+
+@github_router.get(
+    "/tokens",
+    summary="获取Token列表",
+    operation_id="list_github_tokens"
 )
-from app.db.repository import SessionRepository, GitHubTokenRepository
-from app.services.github_service import GitHubService, github_service
-
-router = APIRouter()
-
-# Repository instances
-session_repo = SessionRepository()
-token_repo = GitHubTokenRepository()
+async def list_tokens():
+    """获取所有GitHub tokens"""
+    return await github_service.list_tokens()
 
 
-def mask_token(token: str) -> str:
-    """Mask token for display (show first 4 and last 4 characters)."""
-    if len(token) <= 8:
-        return "****"
-    return f"{token[:4]}{'*' * (len(token) - 8)}{token[-4:]}"
+@github_router.post(
+    "/tokens",
+    summary="创建Token",
+    operation_id="create_github_token"
+)
+async def create_token(data: GitHubTokenCreate):
+    """创建新的GitHub token"""
+    return await github_service.create_token(data)
+
+
+@github_router.delete(
+    "/tokens/{token_id}",
+    summary="删除Token",
+    operation_id="delete_github_token"
+)
+async def delete_token(
+    token_id: int = Path(..., description="Token ID")
+):
+    """删除GitHub token"""
+    return await github_service.delete_token(token_id)
 
 
 # ===================
-# Repository Operations
+# Repository Routes
 # ===================
 
-@router.get("/repo/info", response_model=RepoInfoResponse)
+@github_router.get(
+    "/repos",
+    summary="获取仓库列表",
+    operation_id="list_github_repos"
+)
+async def list_repos(
+    query: Optional[str] = Query(None, description="Search query"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(30, ge=1, le=100, description="Items per page"),
+):
+    """获取用户的GitHub仓库列表"""
+    return await github_service.list_repos(query=query, page=page, per_page=per_page)
+
+
+@github_router.get(
+    "/repos/info",
+    summary="获取仓库信息",
+    operation_id="get_github_repo_info"
+)
 async def get_repo_info(
-    url: str = Query(..., description="GitHub repository URL"),
-) -> RepoInfoResponse:
-    """Get repository information from GitHub."""
-    try:
-        info = await github_service.get_repo_info(url)
-        return RepoInfoResponse(
-            name=info.name,
-            owner=info.owner,
-            full_name=info.full_name,
-            url=info.url,
-            default_branch=info.default_branch,
-            description=info.description,
-            is_private=info.is_private,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/{session_id}/clone")
-async def clone_repository(
-    session_id: str,
-    data: CloneRepoRequest,
-    db: AsyncSession = Depends(get_async_db),
+    repo_url: str = Query(..., description="GitHub repository URL")
 ):
-    """Clone a GitHub repository to session workspace."""
-    session = await session_repo.get_session_by_id(session_id)
-    
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    if not session.workspace_path:
-        raise HTTPException(status_code=400, detail="Session has no workspace")
-    
-    # Get the active GitHub token
-    token_record = await token_repo.get_latest_token(platform="GitHub")
-    
-    # Create a service instance with the user's token
-    service = GitHubService(token=token_record.token if token_record else None)
-    
-    try:
-        await service.clone_repo(
-            repo_url=data.repo_url,
-            target_path=session.workspace_path,
-            branch=data.branch,
-        )
-        
-        # Update session with GitHub info
-        await session_repo.update_session(
-            session_id,
-            github_repo_url=data.repo_url,
-            github_branch=data.branch or "main",
-        )
-        
-        return {
-            "status": "cloned",
-            "repo_url": data.repo_url,
-            "workspace_path": session.workspace_path,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """获取仓库信息"""
+    return await github_service.get_repo_info(repo_url)
 
 
-@router.get("/{session_id}/changes", response_model=List[FileChangeResponse])
-async def get_changes(
-    session_id: str,
-    include_diff: bool = Query(default=False, description="Include diff content"),
-    db: AsyncSession = Depends(get_async_db),
-) -> List[FileChangeResponse]:
-    """Get local changes in repository."""
-    session = await session_repo.get_session_by_id(session_id)
-    
-    if not session or not session.workspace_path:
-        raise HTTPException(status_code=404, detail="Session or workspace not found")
-    
-    try:
-        changes = await github_service.get_local_changes(session.workspace_path, include_diff=include_diff)
-        return [
-            FileChangeResponse(path=c.path, status=c.status, diff=c.diff)
-            for c in changes
-        ]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@github_router.post(
+    "/{session_id}/clone",
+    summary="克隆仓库",
+    operation_id="clone_github_repo"
+)
+async def clone_repo(
+    session_id: str = Path(..., description="Session ID"),
+    data: CloneRepoRequest = Body(...),
+):
+    """克隆仓库到会话工作空间"""
+    return await github_service.clone_repo(
+        session_id=session_id,
+        repo_url=data.repo_url,
+        branch=data.branch,
+    )
 
 
-@router.get("/{session_id}/diff/{file_path:path}")
+# ===================
+# Local Git Routes
+# ===================
+
+@github_router.get(
+    "/{session_id}/changes",
+    summary="获取本地变更",
+    operation_id="get_local_changes"
+)
+async def get_local_changes(
+    session_id: str = Path(..., description="Session ID"),
+    include_diff: bool = Query(False, description="Include diff content"),
+):
+    """获取本地变更"""
+    return await github_service.get_local_changes(
+        session_id=session_id,
+        include_diff=include_diff,
+    )
+
+
+@github_router.get(
+    "/{session_id}/diff",
+    summary="获取文件差异",
+    operation_id="get_file_diff"
+)
 async def get_file_diff(
-    session_id: str,
-    file_path: str,
-    db: AsyncSession = Depends(get_async_db),
-) -> dict:
-    """Get diff for a specific file."""
-    session = await session_repo.get_session_by_id(session_id)
-    
-    if not session or not session.workspace_path:
-        raise HTTPException(status_code=404, detail="Session or workspace not found")
-    
-    try:
-        diff = await github_service.get_file_diff(session.workspace_path, file_path)
-        return {"path": file_path, "diff": diff}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    session_id: str = Path(..., description="Session ID"),
+    file_path: str = Query(..., description="Path to file"),
+):
+    """获取文件差异"""
+    return await github_service.get_file_diff(
+        session_id=session_id,
+        file_path=file_path,
+    )
 
 
-@router.post("/{session_id}/commit")
+@github_router.post(
+    "/{session_id}/commit",
+    summary="提交变更",
+    operation_id="commit_changes"
+)
 async def commit_changes(
-    session_id: str,
-    data: CommitRequest,
-    db: AsyncSession = Depends(get_async_db),
+    session_id: str = Path(..., description="Session ID"),
+    data: CommitRequest = Body(...),
 ):
-    """Commit changes to local repository."""
-    session = await session_repo.get_session_by_id(session_id)
-    
-    if not session or not session.workspace_path:
-        raise HTTPException(status_code=404, detail="Session or workspace not found")
-    
-    try:
-        sha = await github_service.commit_changes(
-            repo_path=session.workspace_path,
-            message=data.message,
-            files=data.files,
-        )
-        return {"status": "committed", "sha": sha}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """提交变更"""
+    return await github_service.commit_changes(
+        session_id=session_id,
+        message=data.message,
+        files=data.files,
+    )
 
 
-@router.post("/{session_id}/push")
+@github_router.post(
+    "/{session_id}/push",
+    summary="推送变更",
+    operation_id="push_changes"
+)
 async def push_changes(
-    session_id: str,
-    data: PushRequest,
-    db: AsyncSession = Depends(get_async_db),
+    session_id: str = Path(..., description="Session ID"),
+    data: PushRequest = Body(default=None),
 ):
-    """Push committed changes to GitHub."""
-    session = await session_repo.get_session_by_id(session_id)
-    
-    if not session or not session.workspace_path:
-        raise HTTPException(status_code=404, detail="Session or workspace not found")
-    
-    # Get the active GitHub token
-    token_record = await token_repo.get_latest_token(platform="GitHub")
-    
-    # Create a service instance with the user's token
-    service = GitHubService(token=token_record.token if token_record else None)
-    
-    try:
-        await service.push_changes(
-            repo_path=session.workspace_path,
-            remote=data.remote,
-            branch=data.branch,
-        )
-        return {"status": "pushed"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """推送变更到远程"""
+    branch = data.branch if data else None
+    return await github_service.push_changes(
+        session_id=session_id,
+        branch=branch,
+    )
 
 
-@router.post("/{session_id}/branch")
-async def create_branch(
-    session_id: str,
-    data: CreateBranchRequest,
-    db: AsyncSession = Depends(get_async_db),
-):
-    """Create a new branch."""
-    session = await session_repo.get_session_by_id(session_id)
-    
-    if not session or not session.workspace_path:
-        raise HTTPException(status_code=404, detail="Session or workspace not found")
-    
-    try:
-        await github_service.create_branch(
-            repo_path=session.workspace_path,
-            branch_name=data.branch_name,
-            checkout=data.checkout,
-        )
-        
-        if data.checkout:
-            await session_repo.update_session(session_id, github_branch=data.branch_name)
-        
-        return {"status": "created", "branch": data.branch_name}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/{session_id}/branches")
-async def list_branches(
-    session_id: str,
-    db: AsyncSession = Depends(get_async_db),
-) -> List[str]:
-    """List branches in repository."""
-    session = await session_repo.get_session_by_id(session_id)
-    
-    if not session or not session.workspace_path:
-        raise HTTPException(status_code=404, detail="Session or workspace not found")
-    
-    try:
-        branches = await github_service.list_branches(session.workspace_path)
-        return [b.name for b in branches]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/{session_id}/checkout")
-async def checkout_branch(
-    session_id: str,
-    branch: str = Query(..., description="Branch to checkout"),
-    db: AsyncSession = Depends(get_async_db),
-):
-    """Checkout a branch."""
-    session = await session_repo.get_session_by_id(session_id)
-    
-    if not session or not session.workspace_path:
-        raise HTTPException(status_code=404, detail="Session or workspace not found")
-    
-    try:
-        await github_service.checkout_branch(session.workspace_path, branch)
-        await session_repo.update_session(session_id, github_branch=branch)
-        return {"status": "checked out", "branch": branch}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/{session_id}/pull")
+@github_router.post(
+    "/{session_id}/pull",
+    summary="拉取变更",
+    operation_id="pull_changes"
+)
 async def pull_changes(
-    session_id: str,
-    db: AsyncSession = Depends(get_async_db),
+    session_id: str = Path(..., description="Session ID"),
 ):
-    """Pull changes from remote."""
-    session = await session_repo.get_session_by_id(session_id)
-
-    if not session or not session.workspace_path:
-        raise HTTPException(status_code=404, detail="Session or workspace not found")
-
-    # Check if workspace is a valid git repository
-    workspace = Path(session.workspace_path)
-    git_dir = workspace / ".git"
-    if not git_dir.exists():
-        raise HTTPException(
-            status_code=400,
-            detail="No git repository found. Please clone a repository first."
-        )
-
-    # Get the active GitHub token
-    token_record = await token_repo.get_latest_token(platform="GitHub")
-
-    # Create a service instance with the user's token
-    service = GitHubService(token=token_record.token if token_record else None)
-
-    try:
-        await service.pull_changes(session.workspace_path)
-        return {"status": "pulled"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """拉取远程变更"""
+    return await github_service.pull_changes(session_id)
 
 
-@router.post("/{session_id}/pr", response_model=PRResponse)
+# ===================
+# Branch Routes
+# ===================
+
+@github_router.get(
+    "/{session_id}/branches",
+    summary="获取分支列表",
+    operation_id="list_branches"
+)
+async def list_branches(
+    session_id: str = Path(..., description="Session ID"),
+):
+    """获取分支列表"""
+    return await github_service.list_branches(session_id)
+
+
+@github_router.post(
+    "/{session_id}/branches",
+    summary="创建分支",
+    operation_id="create_branch"
+)
+async def create_branch(
+    session_id: str = Path(..., description="Session ID"),
+    data: CreateBranchRequest = Body(...),
+):
+    """创建新分支"""
+    return await github_service.create_branch(
+        session_id=session_id,
+        branch_name=data.branch_name,
+        checkout=data.checkout,
+    )
+
+
+@github_router.post(
+    "/{session_id}/checkout",
+    summary="切换分支",
+    operation_id="checkout_branch"
+)
+async def checkout_branch(
+    session_id: str = Path(..., description="Session ID"),
+    data: CheckoutBranchRequest = Body(...),
+):
+    """切换分支"""
+    return await github_service.checkout_branch(
+        session_id=session_id,
+        branch_name=data.branch_name,
+    )
+
+
+# ===================
+# Pull Request Routes
+# ===================
+
+@github_router.post(
+    "/{session_id}/pull-request",
+    summary="创建Pull Request",
+    operation_id="create_pull_request"
+)
 async def create_pull_request(
-    session_id: str,
-    data: CreatePRRequest,
-    db: AsyncSession = Depends(get_async_db),
-) -> PRResponse:
-    """Create a pull request on GitHub."""
-    session = await session_repo.get_session_by_id(session_id)
-    
-    if not session or not session.github_repo_url:
-        raise HTTPException(status_code=404, detail="Session not found or no GitHub repo bound")
-    
-    try:
-        pr = await github_service.create_pull_request(
-            repo_url=session.github_repo_url,
-            title=data.title,
-            body=data.body,
-            head_branch=data.head_branch,
-            base_branch=data.base_branch,
-        )
-        return PRResponse(
-            number=pr.number,
-            title=pr.title,
-            url=pr.url,
-            state=pr.state,
-            head_branch=pr.head_branch,
-            base_branch=pr.base_branch,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/repo/contents")
-async def get_repo_contents(
-    url: str = Query(..., description="GitHub repository URL"),
-    path: str = Query(default="", description="Path within repository"),
-    ref: Optional[str] = Query(default=None, description="Git reference"),
+    session_id: str = Path(..., description="Session ID"),
+    data: CreatePRRequest = Body(...),
 ):
-    """List contents of a directory in GitHub repository."""
-    try:
-        contents = await github_service.list_repo_contents(url, path, ref)
-        return contents
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/repo/file")
-async def get_repo_file(
-    url: str = Query(..., description="GitHub repository URL"),
-    path: str = Query(..., description="File path"),
-    ref: Optional[str] = Query(default=None, description="Git reference"),
-):
-    """Get file content from GitHub repository."""
-    try:
-        content = await github_service.get_file_content(url, path, ref)
-        return {"path": path, "content": content}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ===================
-# Token Management
-# ===================
-
-@router.get("/tokens", response_model=List[GitHubTokenResponse])
-async def list_github_tokens(
-    db: AsyncSession = Depends(get_async_db)
-) -> List[GitHubTokenResponse]:
-    """List all GitHub/GitLab tokens."""
-    tokens = await token_repo.get_active_tokens()
-    
-    return [
-        GitHubTokenResponse(
-            id=t.id,
-            platform=t.platform,
-            domain=t.domain,
-            token=mask_token(t.token),
-            created_at=t.created_at.isoformat(),
-            is_active=t.is_active,
-        )
-        for t in tokens
-    ]
-
-
-@router.post("/tokens", response_model=GitHubTokenResponse, status_code=201)
-async def add_github_token(
-    data: GitHubTokenCreate,
-    db: AsyncSession = Depends(get_async_db)
-) -> GitHubTokenResponse:
-    """Add a new GitHub/GitLab token."""
-    token_id = str(uuid.uuid4())
-    
-    token = await token_repo.create_token(
-        token_id=token_id,
-        platform=data.platform,
-        domain=data.domain,
-        token=data.token,
+    """创建Pull Request"""
+    return await github_service.create_pull_request(
+        session_id=session_id,
+        title=data.title,
+        body=data.body,
+        head_branch=data.head_branch,
+        base_branch=data.base_branch,
     )
-    
-    return GitHubTokenResponse(
-        id=token.id,
-        platform=token.platform,
-        domain=token.domain,
-        token=mask_token(token.token),
-        created_at=token.created_at.isoformat(),
-        is_active=token.is_active,
-    )
-
-
-@router.delete("/tokens/{token_id}")
-async def delete_github_token(
-    token_id: str,
-    db: AsyncSession = Depends(get_async_db)
-):
-    """Delete a GitHub/GitLab token."""
-    success = await token_repo.delete_token(token_id)
-    
-    if not success:
-        raise HTTPException(status_code=404, detail="Token not found")
-    
-    return {"status": "deleted", "id": token_id}
-
-
-@router.get("/user/repos", response_model=List[RepoInfoResponse])
-async def list_user_repos(
-    query: Optional[str] = None,
-    page: int = 1,
-    db: AsyncSession = Depends(get_async_db),
-) -> List[RepoInfoResponse]:
-    """List user's GitHub repositories."""
-    # Get the active GitHub token
-    token_record = await token_repo.get_latest_token(platform="GitHub")
-    
-    if not token_record:
-        raise HTTPException(
-            status_code=400, 
-            detail="Failed to load repositories. Please check your GitHub token."
-        )
-    
-    # Create a service instance with the user's token
-    service = GitHubService(token=token_record.token)
-    
-    try:
-        repos = await service.list_user_repos(query=query, page=page)
-        return [
-            RepoInfoResponse(
-                name=r.name,
-                owner=r.owner,
-                full_name=r.full_name,
-                url=r.url,
-                default_branch=r.default_branch,
-                description=r.description,
-                is_private=r.is_private,
-            )
-            for r in repos
-        ]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))

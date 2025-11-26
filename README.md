@@ -17,7 +17,7 @@
 - **FastAPI**: 高性能 Web 框架
 - **claude-agent-sdk-python**: Claude AI SDK
 - **Docker SDK**: 容器管理
-- **SQLAlchemy**: ORM 数据库访问
+- **SQLAlchemy**: ORM 数据库访问 (MySQL)
 - **PyGithub**: GitHub API 集成
 
 ### 前端
@@ -27,6 +27,73 @@
 - **TailwindCSS**: 样式框架
 - **Monaco Editor**: 代码编辑器
 - **Zustand**: 状态管理
+
+## 架构设计
+
+### 后端架构
+
+采用分层架构设计，遵循 Clean Architecture 原则：
+
+```
+backend/app/
+├── config/              # 配置模块
+│   ├── settings.py      # 应用配置
+│   └── logging_config.py # 日志配置
+├── db/                  # 数据库层
+│   ├── base.py          # 数据库引擎和基类
+│   ├── models/          # ORM 模型
+│   ├── repository/      # 数据访问层
+│   └── schemas/         # Pydantic 模型
+├── routers/             # API 路由层 (只负责路由定义)
+│   ├── sessions.py      # 会话路由
+│   ├── chat.py          # 聊天路由
+│   ├── github.py        # GitHub 路由
+│   └── workspace.py     # 工作空间路由
+├── services/            # 业务逻辑层
+│   ├── session_service.py    # 会话服务
+│   ├── chat_service.py       # 聊天服务
+│   ├── github_api_service.py # GitHub API 服务
+│   ├── workspace_service.py  # 工作空间服务
+│   ├── claude_service.py     # Claude AI 服务
+│   └── docker_service.py     # Docker 服务
+├── utils/               # 工具模块
+│   ├── exceptions/      # 异常处理
+│   └── model/           # 响应模型
+└── main.py              # 应用入口
+```
+
+### 设计模式
+
+1. **Repository Pattern**: 数据访问与业务逻辑分离
+2. **Service Layer**: 所有业务逻辑在 Service 层实现
+3. **BaseResponse**: 统一的 API 响应格式
+4. **@log_print**: 方法级别的日志装饰器
+5. **Exception Handlers**: 全局异常处理
+
+### API 响应格式
+
+所有非流式 API 返回统一的 `BaseResponse` 格式：
+
+```json
+{
+    "code": 200,
+    "message": "success",
+    "data": {...}
+}
+```
+
+列表响应使用 `ListResponse`：
+
+```json
+{
+    "code": 200,
+    "message": "success",
+    "data": {
+        "items": [...],
+        "total": 10
+    }
+}
+```
 
 ## 快速开始
 
@@ -39,11 +106,35 @@ python --version
 # Node.js 18+
 node --version
 
-# Docker
+# Docker (可选)
 docker --version
 ```
 
-### 2. 后端设置
+### 2. 数据库配置
+
+项目使用 MySQL 数据库，配置在 `backend/app/config/config.yaml`：
+
+```yaml
+database:
+  type: mysql
+  host: "172.27.1.20"
+  port: 3306
+  user: "employee_platform"
+  password: "e_Plat123"
+  name: "employee_platform"
+  charset: "utf8mb4"
+  pool_size: 10
+  max_overflow: 20
+  pool_recycle: 3600
+```
+
+数据库表名使用 `code_` 前缀：
+- `code_sessions` - 会话表
+- `code_messages` - 消息表
+- `code_github_tokens` - GitHub Token 表
+- `code_repositories` - 仓库表
+
+### 3. 后端设置
 
 ```bash
 # 进入后端目录
@@ -60,119 +151,69 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 3. 前端设置
+### 4. 前端设置
 
 ```bash
 # 进入前端目录
 cd frontend
 
 # 安装依赖
-npm install pnpm
-
-pnpm install
+npm install
 
 # 启动开发服务器
-pnpm run dev
+npm run dev
 ```
 
-### 4. 访问应用
+### 5. 访问应用
 
-打开浏览器访问：`http://localhost:5173`
+- 前端: `http://localhost:5173`
+- 后端 API 文档: `http://localhost:8000/docs`
+- 健康检查: `http://localhost:8000/health`
 
-## 使用说明
+## API 端点
 
-### 创建会话
+### 会话管理 `/api/sessions`
 
-1. 点击左侧 **"New Session"** 按钮
-2. 输入会话名称
-3. （可选）输入 GitHub 仓库 URL
+| 方法 | 端点 | 描述 |
+|------|------|------|
+| GET | `/api/sessions` | 获取会话列表 |
+| POST | `/api/sessions` | 创建新会话 |
+| GET | `/api/sessions/{id}` | 获取会话详情 |
+| PUT | `/api/sessions/{id}` | 更新会话 |
+| DELETE | `/api/sessions/{id}` | 删除会话 |
+| GET | `/api/sessions/{id}/messages` | 获取会话消息 |
 
-### 聊天对话
+### 聊天 `/api/chat`
 
-1. 在右侧聊天面板输入消息
-2. 等待 Claude 实时流式响应
-3. 支持中断正在进行的响应
+| 方法 | 端点 | 描述 |
+|------|------|------|
+| WS | `/api/chat/ws/{session_id}` | WebSocket 聊天 |
+| GET | `/api/chat/history/{session_id}` | 获取聊天历史 |
+| GET | `/api/chat/stats/{session_id}` | 获取会话统计 |
+| GET | `/api/chat/stats` | 获取全部统计 |
 
-### 文件操作
+### GitHub `/api/github`
 
-1. 在文件树中浏览工作区文件
-2. 点击文件在编辑器中打开
-3. 编辑后自动保存
+| 方法 | 端点 | 描述 |
+|------|------|------|
+| GET | `/api/github/tokens` | 获取 Token 列表 |
+| POST | `/api/github/tokens` | 创建 Token |
+| DELETE | `/api/github/tokens/{id}` | 删除 Token |
+| GET | `/api/github/repos` | 获取仓库列表 |
+| POST | `/api/github/{session_id}/clone` | 克隆仓库 |
+| GET | `/api/github/{session_id}/changes` | 获取本地变更 |
+| POST | `/api/github/{session_id}/commit` | 提交变更 |
+| POST | `/api/github/{session_id}/push` | 推送变更 |
+| GET | `/api/github/{session_id}/branches` | 获取分支列表 |
 
-### GitHub 集成
+### 工作空间 `/api/workspace`
 
-1. 在 GitHub 面板输入仓库 URL
-2. 点击 **"Clone Repository"** 克隆代码
-3. 修改代码后可提交和推送
-
-## 项目结构
-
-```
-cc_python/
-├── backend/              # FastAPI 后端
-│   ├── app/
-│   │   ├── routers/     # API 路由
-│   │   ├── services/    # 业务逻辑
-│   │   ├── models.py    # 数据模型
-│   │   └── main.py      # 应用入口
-│   └── requirements.txt
-│
-├── frontend/            # React 前端
-│   ├── src/
-│   │   ├── components/  # UI 组件
-│   │   ├── hooks/       # 自定义 Hooks
-│   │   ├── contexts/    # Context Providers
-│   │   ├── lib/         # 工具库
-│   │   └── services/    # API 客户端
-│   └── package.json
-│
-└── docker/              # Docker 配置
-    └── workspace/       # 工作区镜像
-```
-
-## 架构亮点
-
-### WebSocket 管理
-
-采用单例模式 + React Context 的架构：
-
-```typescript
-// 单例管理器（websocket.ts）
-class WebSocketManager {
-  // 全局连接管理
-  // 事件发射器模式
-}
-
-// Context 状态（WebSocketContext.tsx）
-<WebSocketProvider>
-  // 提供全局 isConnected 状态
-  // 自动连接管理
-</WebSocketProvider>
-
-// 组件使用
-const { isConnected, send } = useWebSocketContext();
-```
-
-### Docker 工作区隔离
-
-每个会话创建独立 Docker 容器：
-
-- 隔离的文件系统
-- 独立的命令执行环境
-- 安全的代码运行沙箱
-
-### 流式响应
-
-后端通过 WebSocket 推送 Claude 的流式响应：
-
-```python
-async for event in client.query(messages):
-    if event.type == "text_delta":
-        await websocket.send_json({
-            "type": "text_delta",
-            "content": event.text
-        })
-```
+| 方法 | 端点 | 描述 |
+|------|------|------|
+| GET | `/api/workspace/{session_id}/files` | 列出文件 |
+| GET | `/api/workspace/{session_id}/file` | 读取文件 |
+| PUT | `/api/workspace/{session_id}/file` | 写入文件 |
+| DELETE | `/api/workspace/{session_id}/file` | 删除文件 |
 
 ## 配置说明
 
@@ -183,9 +224,12 @@ async for event in client.query(messages):
 | `ANTHROPIC_API_KEY` | Claude API 密钥 | - |
 | `ANTHROPIC_BASE_URL` | API 基础 URL | `https://api.anthropic.com` |
 | `GITHUB_TOKEN` | GitHub 访问令牌 | - |
-| `DATABASE_URL` | 数据库连接 | `sqlite+aiosqlite:///./sessions.db` |
-| `DOCKER_HOST` | Docker 守护进程地址 | `unix:///var/run/docker.sock` |
-| `WORKSPACE_BASE_PATH` | 工作区基础路径 | `workspaces` |
+
+### 日志配置
+
+日志文件存储在 `backend/logs/` 目录：
+- `app.log` - 应用日志
+- 自动按天轮转，保留 30 天
 
 ## 故障排除
 
@@ -195,39 +239,48 @@ async for event in client.query(messages):
 2. 检查浏览器控制台错误信息
 3. 查看后端日志中的 WebSocket 相关日志
 
+### 数据库连接失败
+
+1. 检查 MySQL 服务是否运行
+2. 验证数据库配置是否正确
+3. 确认网络连接正常
+
 ### Docker 容器创建失败
 
 1. 确认 Docker 守护进程正在运行
 2. 检查 Docker 镜像是否已构建
 3. 查看后端日志中的 Docker 相关错误
 
-### 会话无法加载
-
-1. 检查数据库文件 `sessions.db` 是否存在
-2. 确认数据库权限正常
-3. 重启后端服务重新初始化数据库
-
 ## 开发者指南
 
 ### 添加新功能
 
-1. **后端 API**：在 `backend/app/routers/` 添加路由
-2. **前端服务**：在 `frontend/src/services/api.ts` 添加 API 调用
-3. **UI 组件**：在 `frontend/src/components/` 创建组件
-4. **状态管理**：在 `frontend/src/hooks/` 添加 Zustand store
+1. **Service 层**：在 `backend/app/services/` 创建服务类
+   - 使用 `@log_print` 装饰器
+   - 返回 `BaseResponse` 或 `ListResponse`
+   
+2. **Router 层**：在 `backend/app/routers/` 添加路由
+   - 只负责路由定义和参数验证
+   - 业务逻辑委托给 Service
+   
+3. **前端**：
+   - 在 `frontend/src/services/api.ts` 添加 API 调用
+   - 在 `frontend/src/components/` 创建组件
 
-### 调试技巧
+### 代码规范
 
-**后端**：
-```bash
-# 查看详细日志
-uvicorn app.main:app  --log-level debug
-```
-
-**前端**：
-```javascript
-// 浏览器控制台查看状态
-console.log(useSessionStore.getState())
+```python
+# Service 方法示例
+@log_print
+async def get_session(self, session_id: str):
+    """获取会话详情"""
+    try:
+        session = await self.session_repo.get_session_by_id(session_id)
+        if not session:
+            return BaseResponse.not_found(message=f"会话 '{session_id}' 不存在")
+        return BaseResponse.success(data=session.to_dict(), message="获取成功")
+    except Exception as e:
+        return BaseResponse.error(message=f"获取会话失败: {str(e)}")
 ```
 
 ## 许可证

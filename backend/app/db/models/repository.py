@@ -16,7 +16,7 @@ class Repository(Base):
     
     Tracks GitHub repositories that have been cloned/linked.
     """
-    __tablename__ = "repositories"
+    __tablename__ = "code_repository"
     __table_args__ = {'comment': 'GitHub repositories table'}
     
     # Primary key
@@ -63,5 +63,3 @@ class Repository(Base):
     def full_name(self) -> str:
         """Get full repository name (owner/name)"""
         return f"{self.owner}/{self.name}"
-
-

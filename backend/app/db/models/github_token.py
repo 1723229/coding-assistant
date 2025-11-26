@@ -16,7 +16,7 @@ class GitHubToken(Base):
     
     Stores access tokens for GitHub/GitLab integration.
     """
-    __tablename__ = "github_tokens"
+    __tablename__ = "code_github_token"
     __table_args__ = {'comment': 'GitHub/GitLab tokens table'}
     
     # Primary key
@@ -75,5 +75,3 @@ class GitHubToken(Base):
     def is_gitlab(self) -> bool:
         """Check if this is a GitLab token"""
         return self.platform.lower() == "gitlab"
-
-

@@ -1,7 +1,7 @@
 """
 Services Module
 
-Business logic services for the application.
+业务逻辑服务层
 """
 
 from .claude_service import (
@@ -22,7 +22,14 @@ from .github_service import (
     RepoInfo,
     FileChange,
     PullRequestInfo,
+    BranchInfo,
+    GitOperationError,
+    GitHubAPIError,
 )
+from .session_service import SessionService
+from .workspace_service import WorkspaceService
+from .github_api_service import GitHubApiService
+from .chat_service import ChatService
 
 __all__ = [
     # Claude
@@ -41,4 +48,12 @@ __all__ = [
     "RepoInfo",
     "FileChange",
     "PullRequestInfo",
+    "BranchInfo",
+    "GitOperationError",
+    "GitHubAPIError",
+    # API Services
+    "SessionService",
+    "WorkspaceService",
+    "GitHubApiService",
+    "ChatService",
 ]

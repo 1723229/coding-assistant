@@ -1,45 +1,47 @@
+#!/usr/bin/env python3
 """
-FastAPI Application - Main Entry Point
+Claude Code Web Platform - Main FastAPI Application
 
-This module provides the main FastAPI application for the Claude Code Web Platform.
+主应用入口文件
 """
 
+import argparse
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+import uvicorn
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Add the backend directory to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.dirname(current_dir)
 
-# Import configuration and components
-from app.config import get_settings, ClaudeConfig
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+# Import application configurations and components
+from app.config import ServerConfig, ClaudeConfig
+from app.config.logging_config import LoggingConfig
+from app.utils.exceptions import register_exception_handlers
 from app.db.base import init_db, dispose_db
-from app.utils.exceptions import (
-    BusinessException,
-    DatabaseException,
-    ValidationException,
-    NotFoundError,
-)
 from app.services import session_claude_manager
 
 # Import API routers
 from app.routers import (
-    sessions_router,
+    session_router,
     chat_router,
     github_router,
     workspace_router,
 )
 
-# Get settings
-settings = get_settings()
+# Initialize logging
+LoggingConfig().setup_logging()
+
+# Initialize logger (after logging setup)
+logger = logging.getLogger(__name__)
 
 # Setup Claude environment variables
 ClaudeConfig.setup_environment()
@@ -48,69 +50,70 @@ ClaudeConfig.setup_environment()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    FastAPI application lifecycle management
+    FastAPI应用生命周期管理
     
-    Handles startup and shutdown events for:
-    - Database initialization
-    - Claude session manager cleanup task
+    处理启动和关闭事件:
+    - 数据库初始化
+    - Claude会话管理器清理任务
     """
     # Startup
     logger.info("=" * 80)
-    logger.info("🚀 Starting Claude Code Web Platform...")
+    logger.info("Starting Claude Code Web Platform...")
     logger.info("=" * 80)
     
     # Initialize database
     try:
         await init_db()
-        logger.info("✅ Database initialized successfully")
+        logger.info("Database initialized successfully")
     except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
-        logger.warning("⚠️  Application will start but database operations may fail")
+        logger.error(f"Database initialization failed: {e}")
+        logger.warning("Application will start but database operations may fail")
     
     # Start Claude session cleanup task
     try:
         await session_claude_manager.start_cleanup_task()
-        logger.info("✅ Claude session manager started")
+        logger.info("Claude session manager started")
     except Exception as e:
-        logger.error(f"❌ Claude session manager failed to start: {e}")
+        logger.error(f"Claude session manager failed to start: {e}")
     
-    logger.info("✅ Application startup complete")
-    logger.info(f"📍 Server URL: http://{settings.host}:{settings.port}")
-    logger.info(f"📚 Documentation: http://{settings.host}:{settings.port}/docs")
+    logger.info("Application startup complete")
+    logger.info(f"Server URL: http://{ServerConfig.HOST}:{ServerConfig.PORT}")
+    logger.info(f"Documentation: http://{ServerConfig.HOST}:{ServerConfig.PORT}/docs")
+    logger.info(f"Health Check: http://{ServerConfig.HOST}:{ServerConfig.PORT}/health")
     logger.info("=" * 80)
     
     yield
     
     # Shutdown
-    logger.info("👋 Shutting down application...")
+    logger.info("Shutting down application...")
     
     # Stop Claude session cleanup task
     try:
         await session_claude_manager.stop_cleanup_task()
         await session_claude_manager.close_all()
-        logger.info("✅ Claude session manager stopped")
+        logger.info("Claude session manager stopped")
     except Exception as e:
-        logger.error(f"❌ Error stopping Claude session manager: {e}")
+        logger.error(f"Error stopping Claude session manager: {e}")
     
     # Close database connections
     try:
         await dispose_db()
-        logger.info("✅ Database connections closed")
+        logger.info("Database connections closed")
     except Exception as e:
-        logger.error(f"❌ Error closing database: {e}")
+        logger.error(f"Error closing database: {e}")
     
-    logger.info("👋 Application shutdown complete")
+    logger.info("Application shutdown complete")
 
 
 def create_app() -> FastAPI:
     """
-    Create and configure the FastAPI application
+    创建并配置FastAPI应用
     
     Returns:
-        Configured FastAPI application instance
+        配置好的FastAPI应用实例
     """
     app = FastAPI(
-        title=settings.app_name,
+        title="Claude Code Web Platform",
         version="1.0.0",
         description="Web-based Claude Code programming platform with multi-turn conversation support",
         docs_url="/docs",
@@ -121,7 +124,7 @@ def create_app() -> FastAPI:
     # Add CORS middleware (must be first)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=ServerConfig.CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -129,132 +132,127 @@ def create_app() -> FastAPI:
     )
 
     # Register global exception handlers
-    @app.exception_handler(BusinessException)
-    async def business_exception_handler(request: Request, exc: BusinessException):
-        """Handle business logic exceptions"""
-        return JSONResponse(
-            status_code=exc.code,
-            content={
-                "code": exc.code,
-                "message": exc.message,
-                "data": exc.data if hasattr(exc, 'data') else ""
-            }
-        )
+    register_exception_handlers(app)
 
-    @app.exception_handler(NotFoundError)
-    async def not_found_exception_handler(request: Request, exc: NotFoundError):
-        """Handle not found exceptions"""
-        return JSONResponse(
-            status_code=404,
-            content={
-                "code": 404,
-                "message": exc.message,
-                "data": {
-                    "resource_type": exc.resource_type,
-                    "resource_id": exc.resource_id,
-                } if exc.resource_type else ""
-            }
-        )
-
-    @app.exception_handler(DatabaseException)
-    async def database_exception_handler(request: Request, exc: DatabaseException):
-        """Handle database exceptions"""
-        logger.error(f"Database error: {exc.message}", exc_info=True)
-        return JSONResponse(
-            status_code=exc.code,
-            content={
-                "code": exc.code,
-                "message": "Database operation failed",
-                "data": ""
-            }
-        )
-
-    @app.exception_handler(ValidationException)
-    async def validation_exception_handler(request: Request, exc: ValidationException):
-        """Handle validation exceptions"""
-        return JSONResponse(
-            status_code=exc.code,
-            content={
-                "code": exc.code,
-                "message": exc.message,
-                "data": exc.errors
-            }
-        )
-
-    @app.exception_handler(Exception)
-    async def general_exception_handler(request: Request, exc: Exception):
-        """Handle all other exceptions"""
-        logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "code": 500,
-                "message": "Internal server error",
-                "data": ""
-            }
-        )
-
-    # Health check endpoint
+    # Health check endpoints
     @app.get("/", tags=["system"])
     async def root():
         """Root endpoint - health check"""
-        return {
+        from app.utils.model import BaseResponse
+        return BaseResponse.success(data={
             "status": "ok",
-            "app": settings.app_name,
+            "app": "Claude Code Web Platform",
             "version": "1.0.0",
-        }
+        })
 
     @app.get("/health", tags=["system"])
     async def health_check():
         """Detailed health check endpoint"""
-        return {
+        from app.utils.model import BaseResponse
+        return BaseResponse.success(data={
             "status": "healthy",
             "version": "1.0.0",
             "services": {
                 "database": "connected",
                 "claude_sdk": "configured",
             }
-        }
+        })
 
     @app.get("/api/health", tags=["system"])
     async def api_health_check():
         """API health check endpoint"""
-        return {
+        from app.utils.model import BaseResponse
+        return BaseResponse.success(data={
             "status": "healthy",
             "version": "1.0.0",
             "services": {
                 "database": "connected",
                 "claude_sdk": "configured",
             }
-        }
+        })
 
-    # Include routers
-    app.include_router(sessions_router, prefix="/api/sessions", tags=["sessions"])
-    app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
-    app.include_router(github_router, prefix="/api/github", tags=["github"])
-    app.include_router(workspace_router, prefix="/api/workspace", tags=["workspace"])
+    # Include routers with /api prefix
+    app.include_router(session_router, prefix="/api")
+    app.include_router(chat_router, prefix="/api")
+    app.include_router(github_router, prefix="/api")
+    app.include_router(workspace_router, prefix="/api")
 
     return app
+
+
+def run_api(host: str, port: int, **kwargs):
+    """
+    使用给定配置运行API服务器
+    """
+    try:
+        uvicorn.run(
+            "app.main:app",
+            host=host,
+            port=port,
+            reload=kwargs.get("reload") or ServerConfig.RELOAD
+        )
+    except Exception as e:
+        logger.error(f"Failed to start API server: {e}")
+        raise
+
+
+def main() -> None:
+    """
+    Claude Code Web Platform主入口
+    """
+    try:
+        logger.info("=" * 80)
+        logger.info("Starting Claude Code Web Platform...")
+        logger.info("=" * 80)
+
+        logger.info("\n" + "=" * 80)
+        logger.info("Server Information:")
+        logger.info(f"  - Server URL: http://{ServerConfig.HOST}:{ServerConfig.PORT}")
+        logger.info(f"  - Documentation: http://{ServerConfig.HOST}:{ServerConfig.PORT}/docs")
+        logger.info(f"  - Health Check: http://{ServerConfig.HOST}:{ServerConfig.PORT}/health")
+        logger.info("=" * 80)
+
+        # Start the server
+        run_api(
+            host=ServerConfig.HOST,
+            port=ServerConfig.PORT,
+            reload=ServerConfig.RELOAD
+        )
+
+    except KeyboardInterrupt:
+        logger.info("\nShutting down Claude Code Web Platform gracefully...")
+    except Exception as e:
+        error_msg = f"Error starting server: {e}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg) from e
 
 
 # Create the app instance
 app = create_app()
 
-
 if __name__ == "__main__":
-    import uvicorn
-    
-    logger.info("=" * 80)
-    logger.info("🚀 Starting Claude Code Web Platform Server...")
-    logger.info("=" * 80)
-    logger.info(f"  - Server URL: http://{settings.host}:{settings.port}")
-    logger.info(f"  - Documentation: http://{settings.host}:{settings.port}/docs")
-    logger.info(f"  - Health Check: http://{settings.host}:{settings.port}/health")
-    logger.info("=" * 80)
-    
-    uvicorn.run(
-        "app.main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=settings.debug,
-    )
+    parser = argparse.ArgumentParser(prog='claude-code-web',
+                                     description='Claude Code Web Platform Server')
+    parser.add_argument("--host", type=str, default=ServerConfig.HOST)
+    parser.add_argument("--port", type=int, default=ServerConfig.PORT)
+    parser.add_argument("--reload", action="store_true", default=ServerConfig.RELOAD)
+
+    args = parser.parse_args()
+
+    try:
+        logger.info("=" * 80)
+        logger.info("Starting Claude Code Web Platform Server...")
+        logger.info("=" * 80)
+        logger.info(f"  - Server URL: http://{args.host}:{args.port}")
+        logger.info(f"  - Documentation: http://{args.host}:{args.port}/docs")
+        logger.info(f"  - Health Check: http://{args.host}:{args.port}/health")
+        logger.info("=" * 80)
+
+        run_api(
+            host=args.host,
+            port=args.port,
+            reload=args.reload
+        )
+    except Exception as e:
+        logger.error(f"Application startup failed: {e}")
+        sys.exit(1)

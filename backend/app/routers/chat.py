@@ -1,7 +1,8 @@
 """
-WebSocket chat endpoint with streaming support.
+Chat API Router
 
-Provides real-time chat functionality with Claude using WebSocket connections.
+聊天相关的API路由定义
+WebSocket用于实时聊天，HTTP用于历史记录和统计
 """
 
 import json
@@ -11,52 +12,46 @@ from typing import Optional, Dict
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
-from app.db import AsyncSessionLocal
-from app.db.models import Session, Message
 from app.db.repository import SessionRepository, MessageRepository
-from app.services import ClaudeService, ChatMessage, session_claude_manager
+from app.services import ClaudeService, ChatMessage, session_claude_manager, ChatService
 from app.config import get_settings
 
-from sqlalchemy import select
+# 创建路由器
+chat_router = APIRouter(prefix="/chat", tags=["chat"])
 
-router = APIRouter()
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# Repository instances
+# Repository和Service实例
 session_repo = SessionRepository()
 message_repo = MessageRepository()
+chat_service = ChatService()
 
 
 class ConnectionManager:
-    """WebSocket connection manager for chat sessions."""
+    """WebSocket连接管理器"""
     
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
     
     async def connect(self, session_id: str, websocket: WebSocket):
-        """Register a WebSocket connection."""
+        """注册WebSocket连接"""
         self.active_connections[session_id] = websocket
         logger.info(f"WebSocket connected for session: {session_id}")
     
     def disconnect(self, session_id: str):
-        """Unregister a WebSocket connection."""
+        """注销WebSocket连接"""
         if session_id in self.active_connections:
             del self.active_connections[session_id]
             logger.info(f"WebSocket disconnected for session: {session_id}")
     
     async def send_message(self, session_id: str, message: dict):
-        """Send message to specific session."""
+        """发送消息到指定会话"""
         if session_id in self.active_connections:
             await self.active_connections[session_id].send_json(message)
     
-    async def broadcast(self, message: dict):
-        """Broadcast message to all connections."""
-        for connection in self.active_connections.values():
-            await connection.send_json(message)
-    
     def is_connected(self, session_id: str) -> bool:
-        """Check if session is connected."""
+        """检查会话是否已连接"""
         return session_id in self.active_connections
 
 
@@ -64,7 +59,7 @@ manager = ConnectionManager()
 
 
 def chat_message_to_dict(msg: ChatMessage) -> dict:
-    """Convert ChatMessage to dict for JSON serialization."""
+    """将ChatMessage转换为dict"""
     return msg.to_dict()
 
 
@@ -76,7 +71,7 @@ async def save_message(
     tool_input: Optional[str] = None,
     tool_result: Optional[str] = None,
 ):
-    """Save message to database using repository."""
+    """保存消息到数据库"""
     await message_repo.create_message(
         session_id=session_id,
         role=role,
@@ -87,26 +82,31 @@ async def save_message(
     )
 
 
-@router.websocket("/ws/{session_id}")
+# ===================
+# WebSocket Route
+# ===================
+
+@chat_router.websocket("/ws/{session_id}")
 async def websocket_chat(websocket: WebSocket, session_id: str):
-    """WebSocket endpoint for chat with streaming responses.
+    """
+    WebSocket聊天端点，支持流式响应
     
-    Protocol:
-    - Client sends: {"type": "message", "content": "..."}
-    - Client sends: {"type": "ping"}
-    - Client sends: {"type": "interrupt"}
-    - Server sends: {"type": "connected", "session_id": "..."}
-    - Server sends: {"type": "text", "content": "..."}
-    - Server sends: {"type": "tool_use", "tool_name": "...", "tool_input": {...}}
-    - Server sends: {"type": "response_complete"}
-    - Server sends: {"type": "error", "content": "..."}
+    协议:
+    - 客户端发送: {"type": "message", "content": "..."}
+    - 客户端发送: {"type": "ping"}
+    - 客户端发送: {"type": "interrupt"}
+    - 服务端发送: {"type": "connected", "session_id": "..."}
+    - 服务端发送: {"type": "text", "content": "..."}
+    - 服务端发送: {"type": "tool_use", "tool_name": "...", "tool_input": {...}}
+    - 服务端发送: {"type": "response_complete"}
+    - 服务端发送: {"type": "error", "content": "..."}
     """
     
-    # Accept the WebSocket connection FIRST
+    # 先接受WebSocket连接
     await websocket.accept()
     logger.info(f"[WS] Connection accepted for session: {session_id}")
     
-    # Get session info
+    # 获取会话信息
     try:
         session = await session_repo.get_session_by_id(session_id)
         
@@ -133,7 +133,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     
     await manager.connect(session_id, websocket)
     
-    # Send connection confirmation
+    # 发送连接确认
     await websocket.send_json({
         "type": "connected",
         "session_id": session_id,
@@ -142,7 +142,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     
     try:
         while True:
-            # Wait for user message
+            # 等待用户消息
             data = await websocket.receive_json()
             logger.debug(f"[WS] Received data: {data}")
             
@@ -160,22 +160,22 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                 
                 logger.info(f"[WS] User message: {user_message[:50]}...")
                 
-                # Save user message
+                # 保存用户消息
                 await save_message(session_id, "user", user_message)
                 
-                # Send acknowledgment
+                # 发送确认
                 await websocket.send_json({
                     "type": "user_message_received",
                     "content": user_message,
                 })
                 
-                # Create Claude service for this session with multi-turn support
+                # 创建Claude服务
                 claude_service = await session_claude_manager.get_service(
                     session_id=session_id,
                     workspace_path=workspace_path,
                 )
                 
-                # Stream responses with session_id for multi-turn conversation
+                # 流式响应
                 full_response = []
                 try:
                     async for chat_msg in claude_service.chat_stream(
@@ -185,14 +185,14 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                         msg_dict = chat_message_to_dict(chat_msg)
                         await websocket.send_json(msg_dict)
                         
-                        # Collect text for saving
+                        # 收集文本用于保存
                         if chat_msg.type in ("text", "text_delta"):
                             full_response.append(chat_msg.content)
                         
-                        # Small delay to prevent flooding
+                        # 小延迟防止刷屏
                         await asyncio.sleep(0.01)
                     
-                    # Save assistant response
+                    # 保存助手响应
                     if full_response:
                         await save_message(
                             session_id,
@@ -200,7 +200,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                             "".join(full_response),
                         )
                     
-                    # Send completion signal
+                    # 发送完成信号
                     await websocket.send_json({
                         "type": "response_complete",
                     })
@@ -213,7 +213,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                     })
             
             elif message_type == "interrupt":
-                # Handle interrupt signal
+                # 处理中断信号
                 claude_service = await session_claude_manager.get_service(
                     session_id=session_id,
                     workspace_path=workspace_path,
@@ -233,33 +233,39 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
         raise
 
 
-@router.get("/history/{session_id}")
-async def get_chat_history(session_id: str):
-    """Get chat history for a session."""
-    messages = await message_repo.get_session_messages(session_id=session_id)
-    
-    return [
-        {
-            "id": m.id,
-            "role": m.role,
-            "content": m.content,
-            "tool_name": m.tool_name,
-            "created_at": m.created_at.isoformat(),
-        }
-        for m in messages
-    ]
+# ===================
+# HTTP Routes
+# ===================
+
+@chat_router.get(
+    "/history/{session_id}",
+    summary="获取聊天历史",
+    operation_id="get_chat_history"
+)
+async def get_chat_history(
+    session_id: str,
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=500, description="Maximum number of records"),
+):
+    """获取会话的聊天历史"""
+    return await chat_service.get_chat_history(session_id, skip=skip, limit=limit)
 
 
-@router.get("/stats/{session_id}")
+@chat_router.get(
+    "/stats/{session_id}",
+    summary="获取会话统计",
+    operation_id="get_session_stats"
+)
 async def get_session_stats(session_id: str):
-    """Get Claude session statistics."""
-    stats = session_claude_manager.get_session_stats(session_id)
-    if stats is None:
-        return {"session_id": session_id, "status": "not_found"}
-    return stats
+    """获取会话统计信息"""
+    return await chat_service.get_session_stats(session_id)
 
 
-@router.get("/stats")
+@chat_router.get(
+    "/stats",
+    summary="获取全部统计",
+    operation_id="get_all_stats"
+)
 async def get_all_stats():
-    """Get all Claude session statistics."""
-    return session_claude_manager.get_all_stats()
+    """获取所有会话的统计信息"""
+    return await chat_service.get_all_stats()

@@ -17,7 +17,7 @@ class Session(Base):
     
     Manages coding assistant chat sessions with workspace and GitHub integration.
     """
-    __tablename__ = "sessions"
+    __tablename__ = "code_session"
     __table_args__ = {'comment': 'Chat sessions table'}
     
     # Primary key
@@ -72,5 +72,3 @@ class Session(Base):
     def touch(self):
         """Update the updated_at timestamp"""
         self.updated_at = datetime.utcnow()
-
-

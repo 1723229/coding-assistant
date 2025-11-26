@@ -11,6 +11,7 @@ from .exceptions import (
     NotFoundError,
     UnauthorizedError,
     ForbiddenError,
+    register_exception_handlers,
 )
 from .model import (
     ResponseCode,
@@ -26,6 +27,7 @@ __all__ = [
     "NotFoundError",
     "UnauthorizedError",
     "ForbiddenError",
+    "register_exception_handlers",
     # Response models
     "ResponseCode",
     "BaseResponse",

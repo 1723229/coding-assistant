@@ -6,19 +6,20 @@ python-multipart
 
 # Claude Agent SDK (install from GitHub: pip install git+https://github.com/anthropics/claude-agent-sdk-python.git)
 # claude-agent-sdk>=0.1.9
+claude_agent_sdk
 
 # Docker
 docker
-
-claude_agent_sdk
 
 # GitHub
 PyGithub
 gitpython
 
-# Database
+# Database - MySQL
 sqlalchemy
-aiosqlite
+pymysql
+aiomysql
+cryptography
 
 # Configuration
 python-dotenv
@@ -28,4 +29,3 @@ pyyaml
 # Utilities
 aiofiles
 httpx
-

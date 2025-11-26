@@ -1,21 +1,22 @@
 # Coding Assistant Configuration
 # Copy this file to config.yaml and modify as needed
 
-# Database Configuration
+# Database Configuration (MySQL)
 database:
-  # SQLite (default for development)
-  type: sqlite
-  path: ./data/app.db
-  
-  # PostgreSQL (for production)
-  # type: postgresql
-  # host: localhost
-  # port: 5432
-  # user: postgres
-  # password: ""
-  # name: coding_assistant
-  # pool_size: 10
-  # max_overflow: 20
+  host: "172.27.1.20"
+  port: 3306
+  user: "employee_platform"
+  password: "e_Plat123"
+  name: "employee_platform"
+  charset: "utf8mb4"
+  # Connection pool settings
+  pool_size: 10
+  max_overflow: 20
+  pool_recycle: 3600
+  # Timeout settings (seconds)
+  connect_timeout: 60
+  read_timeout: 60
+  write_timeout: 60
 
 # Server Configuration
 server:
@@ -67,4 +68,3 @@ docker:
   network: "claude-network"
   memory_limit: "2g"
   cpu_quota: 100000
-

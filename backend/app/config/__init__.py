@@ -16,6 +16,11 @@ from .settings import (
     Settings,
 )
 
+from .logging_config import (
+    LoggingConfig,
+    log_print,
+)
+
 __all__ = [
     "load_yaml_config",
     "DatabaseConfig",
@@ -26,6 +31,6 @@ __all__ = [
     "DockerConfig",
     "get_settings",
     "Settings",
+    "LoggingConfig",
+    "log_print",
 ]
-
-

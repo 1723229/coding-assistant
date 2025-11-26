@@ -2,7 +2,7 @@
 Configuration Module
 
 Provides centralized configuration management for the application.
-Supports both YAML config files and environment variables.
+Supports YAML config files following employee-platform pattern.
 """
 
 import os
@@ -27,8 +27,10 @@ def load_yaml_config() -> Dict[str, Any]:
         # Fallback to example config if main config doesn't exist
         config_path = config_dir / "config.example.yaml"
         if not config_path.exists():
-            # Return empty config if no file exists
-            return {}
+            raise FileNotFoundError(
+                f"Configuration file not found. Please create {config_dir / 'config.yaml'} "
+                f"based on {config_dir / 'config.example.yaml'}"
+            )
 
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -52,43 +54,43 @@ class DatabaseConfig:
 
     _db_config = _config.get("database", {})
 
-    # Database type
-    TYPE = _db_config.get("type", "sqlite")
-
-    # SQLite settings
-    PATH = _db_config.get("path", "./data/app.db")
-
-    # PostgreSQL/MySQL settings
+    # Database connection parameters
     HOST = _db_config.get("host", "localhost")
-    PORT = _db_config.get("port", 5432)
-    USER = _db_config.get("user", "postgres")
+    PORT = _db_config.get("port", 3306)
+    USER = _db_config.get("user", "root")
     PASSWORD = _db_config.get("password", "")
     NAME = _db_config.get("name", "coding_assistant")
+    CHARSET = _db_config.get("charset", "utf8mb4")
 
     # Connection pool settings
     POOL_SIZE = _db_config.get("pool_size", 10)
     MAX_OVERFLOW = _db_config.get("max_overflow", 20)
     POOL_RECYCLE = _db_config.get("pool_recycle", 3600)
 
+    # Connection timeout settings
+    CONNECT_TIMEOUT = _db_config.get("connect_timeout", 60)
+    READ_TIMEOUT = _db_config.get("read_timeout", 60)
+    WRITE_TIMEOUT = _db_config.get("write_timeout", 60)
+
     @classmethod
     def get_database_url(cls) -> str:
         """
-        Build database connection URL
+        Build MySQL database connection URL
         
         Returns:
             Complete database connection URL
         """
-        if cls.TYPE == "sqlite":
-            # Ensure data directory exists
-            db_path = Path(cls.PATH)
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            return f"sqlite+aiosqlite:///{cls.PATH}"
-        elif cls.TYPE == "postgresql":
-            return f"postgresql+asyncpg://{cls.USER}:{cls.PASSWORD}@{cls.HOST}:{cls.PORT}/{cls.NAME}"
-        elif cls.TYPE == "mysql":
-            return f"mysql+aiomysql://{cls.USER}:{cls.PASSWORD}@{cls.HOST}:{cls.PORT}/{cls.NAME}"
-        else:
-            raise ValueError(f"Unsupported database type: {cls.TYPE}")
+        return f"mysql+pymysql://{cls.USER}:{cls.PASSWORD}@{cls.HOST}:{cls.PORT}/{cls.NAME}"
+
+    @classmethod
+    def get_async_database_url(cls) -> str:
+        """
+        Build async MySQL database connection URL
+        
+        Returns:
+            Complete async database connection URL
+        """
+        return f"mysql+aiomysql://{cls.USER}:{cls.PASSWORD}@{cls.HOST}:{cls.PORT}/{cls.NAME}"
 
 
 # ============================================================================
@@ -105,6 +107,16 @@ class ServerConfig:
     RELOAD = _server_config.get("reload", True)
     DEBUG = _server_config.get("debug", False)
     CORS_ORIGINS = _server_config.get("cors_origins", ["http://localhost:5173", "http://localhost:3000"])
+
+    @classmethod
+    def get_web_interface_url(cls) -> str:
+        """
+        Get Web interface URL
+        
+        Returns:
+            Complete Web interface URL
+        """
+        return f"http://localhost:{cls.PORT}"
 
 
 # ============================================================================
@@ -214,7 +226,7 @@ class Settings(BaseSettings):
     github_default_repo: str = GitHubConfig.DEFAULT_REPO
 
     # Database
-    database_url: str = DatabaseConfig.get_database_url()
+    database_url: str = DatabaseConfig.get_async_database_url()
 
     # Workspace Configuration
     workspace_base_path: Path = WorkspaceConfig.BASE_PATH

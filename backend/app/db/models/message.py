@@ -17,14 +17,14 @@ class Message(Base):
     
     Stores individual messages in a chat session.
     """
-    __tablename__ = "messages"
+    __tablename__ = "code_message"
     __table_args__ = {'comment': 'Chat messages table'}
     
     # Primary key
     id = Column(Integer, primary_key=True, autoincrement=True, comment="Message ID")
     
     # Session reference
-    session_id = Column(String(36), ForeignKey("sessions.id"), nullable=False, index=True, comment="Session ID")
+    session_id = Column(String(36), ForeignKey("code_session.id"), nullable=False, index=True, comment="Session ID")
     
     # Message content
     role = Column(String(20), nullable=False, comment="Message role: user, assistant, system")
@@ -82,5 +82,3 @@ class Message(Base):
     def has_tool_use(self) -> bool:
         """Check if this message involves tool use"""
         return self.tool_name is not None
-
-

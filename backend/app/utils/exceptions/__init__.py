@@ -13,6 +13,14 @@ from .base_exceptions import (
     ForbiddenError,
 )
 
+from .exception_handlers import (
+    register_exception_handlers,
+    validation_exception_handler,
+    http_exception_handler,
+    business_exception_handler,
+    general_exception_handler,
+)
+
 __all__ = [
     "BusinessException",
     "DatabaseException",
@@ -20,6 +28,9 @@ __all__ = [
     "NotFoundError",
     "UnauthorizedError",
     "ForbiddenError",
+    "register_exception_handlers",
+    "validation_exception_handler",
+    "http_exception_handler",
+    "business_exception_handler",
+    "general_exception_handler",
 ]
-
-
