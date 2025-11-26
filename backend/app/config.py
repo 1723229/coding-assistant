@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        # 新增配置：禁用系统环境变量读取，只从 .env 文件和默认值加载
+        extra = "ignore"  # 忽略未定义的环境变量
+        env_nested_delimiter = "__"
+        # 关键配置：设置一个不存在的环境变量前缀，让系统环境变量无法被匹配
+        env_prefix = "NON_EXISTENT_PREFIX_"
 
 
 @lru_cache
@@ -53,4 +58,3 @@ settings.workspace_base_path.mkdir(parents=True, exist_ok=True)
 
 # Create data directory for database
 Path("./data").mkdir(parents=True, exist_ok=True)
-
