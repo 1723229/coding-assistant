@@ -25,7 +25,7 @@ class WebSocketManager {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/chat/ws/${sessionId}`);
+    const ws = new WebSocket(`${protocol}//${window.location.host}/api/code/chat/ws/${sessionId}`);
     this.connections.set(sessionId, ws);
 
     ws.onopen = () => {

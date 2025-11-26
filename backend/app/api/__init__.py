@@ -4,10 +4,10 @@ API Routers Module
 FastAPI路由模块
 """
 
-from .sessions import session_router
-from .chat import chat_router
-from .github import github_router
-from .workspace import workspace_router
+from .session_router import session_router
+from .chat_router import chat_router
+from .github_router import github_router
+from .workspace_router import workspace_router
 
 __all__ = [
     "session_router",

@@ -148,7 +148,7 @@ source .venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # 启动服务
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+python app/main.py
 ```
 
 ### 4. 前端设置
@@ -169,51 +169,6 @@ npm run dev
 - 前端: `http://localhost:5173`
 - 后端 API 文档: `http://localhost:8000/docs`
 - 健康检查: `http://localhost:8000/health`
-
-## API 端点
-
-### 会话管理 `/api/sessions`
-
-| 方法 | 端点 | 描述 |
-|------|------|------|
-| GET | `/api/sessions` | 获取会话列表 |
-| POST | `/api/sessions` | 创建新会话 |
-| GET | `/api/sessions/{id}` | 获取会话详情 |
-| PUT | `/api/sessions/{id}` | 更新会话 |
-| DELETE | `/api/sessions/{id}` | 删除会话 |
-| GET | `/api/sessions/{id}/messages` | 获取会话消息 |
-
-### 聊天 `/api/chat`
-
-| 方法 | 端点 | 描述 |
-|------|------|------|
-| WS | `/api/chat/ws/{session_id}` | WebSocket 聊天 |
-| GET | `/api/chat/history/{session_id}` | 获取聊天历史 |
-| GET | `/api/chat/stats/{session_id}` | 获取会话统计 |
-| GET | `/api/chat/stats` | 获取全部统计 |
-
-### GitHub `/api/github`
-
-| 方法 | 端点 | 描述 |
-|------|------|------|
-| GET | `/api/github/tokens` | 获取 Token 列表 |
-| POST | `/api/github/tokens` | 创建 Token |
-| DELETE | `/api/github/tokens/{id}` | 删除 Token |
-| GET | `/api/github/repos` | 获取仓库列表 |
-| POST | `/api/github/{session_id}/clone` | 克隆仓库 |
-| GET | `/api/github/{session_id}/changes` | 获取本地变更 |
-| POST | `/api/github/{session_id}/commit` | 提交变更 |
-| POST | `/api/github/{session_id}/push` | 推送变更 |
-| GET | `/api/github/{session_id}/branches` | 获取分支列表 |
-
-### 工作空间 `/api/workspace`
-
-| 方法 | 端点 | 描述 |
-|------|------|------|
-| GET | `/api/workspace/{session_id}/files` | 列出文件 |
-| GET | `/api/workspace/{session_id}/file` | 读取文件 |
-| PUT | `/api/workspace/{session_id}/file` | 写入文件 |
-| DELETE | `/api/workspace/{session_id}/file` | 删除文件 |
 
 ## 配置说明
 
@@ -282,11 +237,3 @@ async def get_session(self, session_id: str):
     except Exception as e:
         return BaseResponse.error(message=f"获取会话失败: {str(e)}")
 ```
-
-## 许可证
-
-MIT License
-
-## 贡献
-
-欢迎提交 Issue 和 Pull Request！
