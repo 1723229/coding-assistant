@@ -61,6 +61,7 @@ class FileChangeResponse(BaseModel):
     """File change response."""
     path: str
     status: str
+    diff: Optional[str] = None
 
 
 class PRResponse(BaseModel):
@@ -131,8 +132,20 @@ async def clone_repository(
     if not session.workspace_path:
         raise HTTPException(status_code=400, detail="Session has no workspace")
     
+    # Get the active GitHub token from database
+    token_result = await db.execute(
+        select(GitHubToken).where(
+            GitHubToken.is_active == True,
+            GitHubToken.platform == "GitHub"
+        ).order_by(GitHubToken.created_at.desc()).limit(1)
+    )
+    token_record = token_result.scalar_one_or_none()
+    
+    # Create a service instance with the user's token
+    service = GitHubService(token=token_record.token if token_record else None)
+    
     try:
-        await github_service.clone_repo(
+        await service.clone_repo(
             repo_url=data.repo_url,
             target_path=session.workspace_path,
             branch=data.branch,
@@ -155,6 +168,7 @@ async def clone_repository(
 @router.get("/{session_id}/changes")
 async def get_changes(
     session_id: str,
+    include_diff: bool = Query(default=False, description="Include diff content"),
     db: AsyncSession = Depends(get_db),
 ) -> list[FileChangeResponse]:
     """Get local changes in repository."""
@@ -167,11 +181,33 @@ async def get_changes(
         raise HTTPException(status_code=404, detail="Session or workspace not found")
     
     try:
-        changes = await github_service.get_local_changes(session.workspace_path)
+        changes = await github_service.get_local_changes(session.workspace_path, include_diff=include_diff)
         return [
-            FileChangeResponse(path=c.path, status=c.status)
+            FileChangeResponse(path=c.path, status=c.status, diff=c.diff)
             for c in changes
         ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{session_id}/diff/{file_path:path}")
+async def get_file_diff(
+    session_id: str,
+    file_path: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get diff for a specific file."""
+    result = await db.execute(
+        select(Session).where(Session.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    
+    if not session or not session.workspace_path:
+        raise HTTPException(status_code=404, detail="Session or workspace not found")
+    
+    try:
+        diff = await github_service.get_file_diff(session.workspace_path, file_path)
+        return {"path": file_path, "diff": diff}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -217,8 +253,20 @@ async def push_changes(
     if not session or not session.workspace_path:
         raise HTTPException(status_code=404, detail="Session or workspace not found")
     
+    # Get the active GitHub token from database
+    token_result = await db.execute(
+        select(GitHubToken).where(
+            GitHubToken.is_active == True,
+            GitHubToken.platform == "GitHub"
+        ).order_by(GitHubToken.created_at.desc()).limit(1)
+    )
+    token_record = token_result.scalar_one_or_none()
+    
+    # Create a service instance with the user's token
+    service = GitHubService(token=token_record.token if token_record else None)
+    
     try:
-        await github_service.push_changes(
+        await service.push_changes(
             repo_path=session.workspace_path,
             remote=data.remote,
             branch=data.branch,
@@ -318,8 +366,20 @@ async def pull_changes(
     if not session or not session.workspace_path:
         raise HTTPException(status_code=404, detail="Session or workspace not found")
     
+    # Get the active GitHub token from database
+    token_result = await db.execute(
+        select(GitHubToken).where(
+            GitHubToken.is_active == True,
+            GitHubToken.platform == "GitHub"
+        ).order_by(GitHubToken.created_at.desc()).limit(1)
+    )
+    token_record = token_result.scalar_one_or_none()
+    
+    # Create a service instance with the user's token
+    service = GitHubService(token=token_record.token if token_record else None)
+    
     try:
-        await github_service.pull_changes(session.workspace_path)
+        await service.pull_changes(session.workspace_path)
         return {"status": "pulled"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

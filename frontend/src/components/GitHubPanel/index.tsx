@@ -275,7 +275,6 @@ export function GitHubPanel() {
                         repoUrl={currentSession.github_repo_url!}
                         branch={currentSession.github_branch || 'main'}
                         onPull={handlePull}
-                        onPush={handlePush}
                         isLoading={isLoading}
                     />
                 )}
@@ -286,6 +285,7 @@ export function GitHubPanel() {
                         changes={changes}
                         onRefresh={loadChanges}
                         onCommit={handleCommit}
+                        onPush={handlePush}
                         isLoading={isLoading}
                     />
                 )}

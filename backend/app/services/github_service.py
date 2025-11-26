@@ -34,6 +34,7 @@ class FileChange:
     status: str  # added, modified, deleted, renamed
     additions: int = 0
     deletions: int = 0
+    diff: Optional[str] = None
 
 
 @dataclass
@@ -248,40 +249,127 @@ class GitHubService:
         if exit_code != 0:
             raise RuntimeError(f"Failed to clone repository: {output}")
     
-    async def get_local_changes(self, repo_path: str) -> list[FileChange]:
+    async def get_local_changes(self, repo_path: str, include_diff: bool = False) -> list[FileChange]:
         """Get list of local changes in repository.
         
         Args:
             repo_path: Path to local repository
+            include_diff: Whether to include diff content
             
         Returns:
             List of FileChange objects
         """
         repo = Repo(repo_path)
         changes = []
+        seen_paths = set()
         
         # Get staged changes
         for diff in repo.index.diff("HEAD"):
+            path = diff.a_path or diff.b_path
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            
+            diff_content = None
+            if include_diff:
+                try:
+                    diff_content = repo.git.diff("HEAD", "--", path)
+                except:
+                    pass
+            
             changes.append(FileChange(
-                path=diff.a_path or diff.b_path,
+                path=path,
                 status="modified" if diff.change_type == "M" else diff.change_type.lower(),
+                diff=diff_content,
             ))
         
         # Get unstaged changes
         for diff in repo.index.diff(None):
+            path = diff.a_path or diff.b_path
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            
+            diff_content = None
+            if include_diff:
+                try:
+                    diff_content = repo.git.diff("--", path)
+                except:
+                    pass
+            
             changes.append(FileChange(
-                path=diff.a_path or diff.b_path,
+                path=path,
                 status="modified" if diff.change_type == "M" else diff.change_type.lower(),
+                diff=diff_content,
             ))
         
         # Get untracked files
         for path in repo.untracked_files:
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            
+            diff_content = None
+            if include_diff:
+                try:
+                    # For new files, show full content as addition
+                    file_path = Path(repo_path) / path
+                    if file_path.exists():
+                        content = file_path.read_text(errors='replace')
+                        lines = content.split('\n')
+                        diff_lines = [f"+{line}" for line in lines]
+                        diff_content = f"--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{len(lines)} @@\n" + '\n'.join(diff_lines)
+                except:
+                    pass
+            
             changes.append(FileChange(
                 path=path,
                 status="added",
+                diff=diff_content,
             ))
         
         return changes
+    
+    async def get_file_diff(self, repo_path: str, file_path: str) -> str:
+        """Get diff for a specific file.
+        
+        Args:
+            repo_path: Path to local repository
+            file_path: Path to the file relative to repo root
+            
+        Returns:
+            Unified diff string
+        """
+        repo = Repo(repo_path)
+        
+        # Check if file is untracked
+        if file_path in repo.untracked_files:
+            # For new files, show full content as addition
+            full_path = Path(repo_path) / file_path
+            if full_path.exists():
+                content = full_path.read_text(errors='replace')
+                lines = content.split('\n')
+                diff_lines = [f"+{line}" for line in lines]
+                return f"--- /dev/null\n+++ b/{file_path}\n@@ -0,0 +1,{len(lines)} @@\n" + '\n'.join(diff_lines)
+            return ""
+        
+        # Try to get diff from staged changes first
+        try:
+            diff = repo.git.diff("HEAD", "--", file_path)
+            if diff:
+                return diff
+        except:
+            pass
+        
+        # Try to get diff from unstaged changes
+        try:
+            diff = repo.git.diff("--", file_path)
+            if diff:
+                return diff
+        except:
+            pass
+        
+        return ""
     
     async def commit_changes(
         self,
@@ -336,12 +424,24 @@ class GitHubService:
             # Update remote URL with token
             remote_obj = repo.remote(remote)
             old_url = remote_obj.url
-            if "github.com" in old_url and "@" not in old_url:
-                new_url = old_url.replace(
-                    "https://github.com",
-                    f"https://{self.token}@github.com"
-                )
-                remote_obj.set_url(new_url)
+            
+            if "github.com" in old_url:
+                # Build the authenticated URL
+                # Handle both cases: URL with existing token and URL without token
+                if old_url.startswith("https://"):
+                    # Remove any existing credentials from URL
+                    # URL format: https://[user:pass@]github.com/...
+                    if "@github.com" in old_url:
+                        # Extract path after github.com
+                        path_start = old_url.find("@github.com") + len("@github.com")
+                        path = old_url[path_start:]
+                    else:
+                        # Extract path after github.com
+                        path_start = old_url.find("github.com") + len("github.com")
+                        path = old_url[path_start:]
+                    
+                    new_url = f"https://{self.token}@github.com{path}"
+                    remote_obj.set_url(new_url)
         
         await asyncio.to_thread(
             repo.remote(remote).push,
@@ -469,6 +569,23 @@ class GitHubService:
         
         if branch is None:
             branch = repo.active_branch.name
+        
+        # Set up credentials if token is available
+        if self.token:
+            remote_obj = repo.remote(remote)
+            old_url = remote_obj.url
+            
+            if "github.com" in old_url and old_url.startswith("https://"):
+                # Remove any existing credentials and add new token
+                if "@github.com" in old_url:
+                    path_start = old_url.find("@github.com") + len("@github.com")
+                    path = old_url[path_start:]
+                else:
+                    path_start = old_url.find("github.com") + len("github.com")
+                    path = old_url[path_start:]
+                
+                new_url = f"https://{self.token}@github.com{path}"
+                remote_obj.set_url(new_url)
         
         await asyncio.to_thread(
             repo.remote(remote).pull,

@@ -6,6 +6,7 @@ import type {
     FileContent,
     RepoInfo,
     FileChange,
+    FileDiff,
     PullRequest,
     GitHubToken
 } from '../types';
@@ -103,8 +104,11 @@ export const githubApi = {
             body: JSON.stringify({ repo_url: repoUrl, branch }),
         }),
 
-    getChanges: (sessionId: string) =>
-        fetchJson<FileChange[]>(`/github/${sessionId}/changes`),
+    getChanges: (sessionId: string, includeDiff = false) =>
+        fetchJson<FileChange[]>(`/github/${sessionId}/changes?include_diff=${includeDiff}`),
+
+    getFileDiff: (sessionId: string, filePath: string) =>
+        fetchJson<FileDiff>(`/github/${sessionId}/diff/${encodeURIComponent(filePath)}`),
 
     commit: (sessionId: string, message: string, files?: string[]) =>
         fetchJson<{ status: string; sha: string }>(`/github/${sessionId}/commit`, {

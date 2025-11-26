@@ -100,6 +100,7 @@ class ClaudeService:
             ChatMessage objects for each response chunk
         """
         client = await self.create_client()
+        generator_closed = False
         
         try:
             await client.query(prompt)
@@ -111,6 +112,11 @@ class ClaudeService:
                         on_message(chat_msg)
                     yield chat_msg
                     
+        except GeneratorExit:
+            # Client disconnected - mark as closed to avoid disconnect in finally
+            generator_closed = True
+            raise
+                    
         except Exception as e:
             error_msg = ChatMessage(
                 type="error",
@@ -121,7 +127,16 @@ class ClaudeService:
             yield error_msg
             
         finally:
-            await client.disconnect()
+            # Only disconnect if generator wasn't closed prematurely
+            # When GeneratorExit occurs, the client's internal task group may be
+            # in a different context, causing "cancel scope in different task" errors
+            if not generator_closed:
+                try:
+                    await client.disconnect()
+                except RuntimeError as e:
+                    # Ignore cancel scope errors that occur during cleanup
+                    if "cancel scope" not in str(e).lower():
+                        raise
     
     async def chat(self, prompt: str) -> list[ChatMessage]:
         """Send a message and get all responses.
