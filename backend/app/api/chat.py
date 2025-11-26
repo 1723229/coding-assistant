@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
 from app.db.repository import SessionRepository, MessageRepository
-from app.services import ClaudeService, ChatMessage, session_claude_manager, ChatService
+from app.service import ClaudeService, ChatMessage, session_claude_manager, ChatService
 from app.config import get_settings
 
 # 创建路由器

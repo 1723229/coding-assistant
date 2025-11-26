@@ -6,7 +6,7 @@ Session API Router
 """
 
 from fastapi import APIRouter, Query, Path
-from app.services import SessionService
+from app.service import SessionService
 from app.db.schemas import SessionCreate, SessionUpdate
 
 # 创建路由器

@@ -8,7 +8,7 @@ Workspace API Router
 from fastapi import APIRouter, Query, Path, Body
 from pydantic import BaseModel
 
-from app.services import WorkspaceService
+from app.service import WorkspaceService
 
 # 创建路由器
 workspace_router = APIRouter(prefix="/workspace", tags=["workspace"])

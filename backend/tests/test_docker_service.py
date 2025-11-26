@@ -4,7 +4,7 @@ import pytest
 from datetime import datetime
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from app.services.docker_service import (
+from app.service.docker_service import (
     DockerService,
     ContainerInfo,
     ContainerStatus,

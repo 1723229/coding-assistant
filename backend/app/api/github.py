@@ -9,7 +9,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Query, Path, Body
 from pydantic import BaseModel
 
-from app.services import GitHubApiService
+from app.service import GitHubApiService
 from app.db.schemas import GitHubTokenCreate
 
 # 创建路由器

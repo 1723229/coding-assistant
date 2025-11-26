@@ -77,8 +77,8 @@ class SessionService:
     @log_print
     async def create_session(self, data: SessionCreate):
         """创建新会话"""
-        from app.services import docker_service
-        from app.services.github_service import GitHubService
+        from app.service import docker_service
+        from app.service.github_service import GitHubService
         
         try:
             session_id = str(uuid.uuid4())

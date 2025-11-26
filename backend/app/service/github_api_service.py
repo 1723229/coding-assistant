@@ -13,7 +13,7 @@ from app.config.logging_config import log_print
 from app.utils.model.response_model import BaseResponse, ListResponse
 from app.db.repository import SessionRepository, GitHubTokenRepository
 from app.db.schemas import GitHubTokenCreate
-from app.services.github_service import (
+from app.service.github_service import (
     GitHubService, 
     GitOperationError, 
     GitHubAPIError

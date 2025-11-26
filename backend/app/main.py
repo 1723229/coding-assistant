@@ -27,10 +27,10 @@ from app.config import ServerConfig, ClaudeConfig
 from app.config.logging_config import LoggingConfig
 from app.utils.exceptions import register_exception_handlers
 from app.db.base import init_db, dispose_db
-from app.services import session_claude_manager
+from app.service import session_claude_manager
 
 # Import API routers
-from app.routers import (
+from app.api import (
     session_router,
     chat_router,
     github_router,

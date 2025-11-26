@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from app.services.github_service import (
+from app.service.github_service import (
     GitHubService,
     RepoInfo,
     FileChange,
@@ -154,7 +154,7 @@ class TestGitHubService:
     def test_build_authenticated_url_no_token(self):
         """Test building URL without token returns original."""
         # Patch settings to ensure no default token
-        with patch('app.services.github_service.settings') as mock_settings:
+        with patch('app.service.github_service.settings') as mock_settings:
             mock_settings.github_token = None
             service = GitHubService(token=None)
             
