@@ -153,16 +153,19 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                     "content": user_message,
                 })
                 
-                # Create Claude service for this session
+                # Create Claude service for this session with multi-turn support
                 claude_service = await session_claude_manager.get_service(
                     session_id=session_id,
                     workspace_path=workspace_path,
                 )
                 
-                # Stream responses
+                # Stream responses with session_id for multi-turn conversation
                 full_response = []
                 try:
-                    async for chat_msg in claude_service.chat_stream(user_message):
+                    async for chat_msg in claude_service.chat_stream(
+                        user_message,
+                        session_id=session_id,  # Enable multi-turn conversation
+                    ):
                         msg_dict = chat_message_to_dict(chat_msg)
                         await websocket.send_json(msg_dict)
                         

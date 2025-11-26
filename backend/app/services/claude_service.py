@@ -1,10 +1,12 @@
-"""Claude Agent SDK service wrapper with streaming support."""
+"""Claude Agent SDK service wrapper with streaming support and multi-turn conversation."""
 
 import os
 import json
 import asyncio
-from typing import AsyncIterator, Optional, Any, Callable
-from dataclasses import dataclass
+from typing import AsyncIterator, Optional, Any, Callable, Dict
+from dataclasses import dataclass, field
+from datetime import datetime
+from contextlib import asynccontextmanager
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -27,41 +29,65 @@ settings = get_settings()
 @dataclass
 class ChatMessage:
     """Simplified chat message for WebSocket transmission."""
-    type: str  # "text", "tool_use", "tool_result", "system", "result", "error"
+    type: str  # "text", "tool_use", "tool_result", "system", "result", "error", "thinking"
     content: str
     tool_name: Optional[str] = None
     tool_input: Optional[dict] = None
     metadata: Optional[dict] = None
 
 
+@dataclass
+class ConversationContext:
+    """Context for a conversation session."""
+    session_id: str
+    workspace_path: str
+    client: Optional[ClaudeSDKClient] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    last_activity: datetime = field(default_factory=datetime.now)
+    message_count: int = 0
+    is_connected: bool = False
+    
+    def touch(self):
+        """Update last activity timestamp."""
+        self.last_activity = datetime.now()
+        self.message_count += 1
+
+
 class ClaudeService:
-    """Service for interacting with Claude SDK."""
+    """Service for interacting with Claude SDK with multi-turn conversation support."""
+    
+    # Default tools available for Claude
+    DEFAULT_TOOLS = [
+        "Read",
+        "Write", 
+        "Edit",
+        "MultiEdit",
+        "Bash",
+        "Glob",
+        "Grep",
+        "LS",
+        "TodoRead",
+        "TodoWrite",
+    ]
     
     def __init__(
         self,
         workspace_path: Optional[str] = None,
         allowed_tools: Optional[list[str]] = None,
+        session_id: Optional[str] = None,
     ):
         """Initialize Claude service.
         
         Args:
             workspace_path: Working directory for Claude operations
             allowed_tools: List of tools to enable (default: common tools)
+            session_id: Session identifier for multi-turn conversations
         """
         self.workspace_path = workspace_path
-        self.allowed_tools = allowed_tools or [
-            "Read",
-            "Write", 
-            "Edit",
-            "MultiEdit",
-            "Bash",
-            "Glob",
-            "Grep",
-            "LS",
-            "TodoRead",
-            "TodoWrite",
-        ]
+        self.allowed_tools = allowed_tools or self.DEFAULT_TOOLS.copy()
+        self.session_id = session_id
         self._client: Optional[ClaudeSDKClient] = None
+        self._is_connected = False
         
     def _create_options(self) -> ClaudeAgentOptions:
         """Create Claude agent options."""
@@ -78,32 +104,70 @@ class ClaudeService:
         )
         return options
     
-    async def create_client(self) -> ClaudeSDKClient:
-        """Create and connect a new Claude client."""
+    async def connect(self) -> ClaudeSDKClient:
+        """Connect to Claude SDK client.
+        
+        Returns:
+            Connected ClaudeSDKClient instance
+        """
+        if self._client is not None and self._is_connected:
+            return self._client
+            
         options = self._create_options()
-        client = ClaudeSDKClient(options=options)
-        await client.connect()
-        return client
+        self._client = ClaudeSDKClient(options=options)
+        await self._client.connect()
+        self._is_connected = True
+        return self._client
+    
+    async def disconnect(self):
+        """Disconnect from Claude SDK client."""
+        if self._client is not None and self._is_connected:
+            try:
+                await self._client.disconnect()
+            except RuntimeError as e:
+                # Ignore cancel scope errors during cleanup
+                if "cancel scope" not in str(e).lower():
+                    raise
+            finally:
+                self._is_connected = False
+    
+    @asynccontextmanager
+    async def connection(self):
+        """Context manager for Claude client connection."""
+        try:
+            client = await self.connect()
+            yield client
+        finally:
+            await self.disconnect()
     
     async def chat_stream(
         self,
         prompt: str,
+        session_id: Optional[str] = None,
         on_message: Optional[Callable[[ChatMessage], None]] = None,
     ) -> AsyncIterator[ChatMessage]:
-        """Send a message and stream responses.
+        """Send a message and stream responses with multi-turn conversation support.
         
         Args:
             prompt: User message to send
+            session_id: Session ID for multi-turn conversation (uses instance session_id if not provided)
             on_message: Optional callback for each message
             
         Yields:
             ChatMessage objects for each response chunk
         """
-        client = await self.create_client()
+        # Use provided session_id or fall back to instance session_id
+        effective_session_id = session_id or self.session_id
+        
+        client = await self.connect()
         generator_closed = False
         
         try:
-            await client.query(prompt)
+            # Send query with session_id for multi-turn conversation support
+            if effective_session_id:
+                await client.query(prompt, session_id=effective_session_id)
+            else:
+                await client.query(prompt)
             
             async for msg in client.receive_response():
                 chat_messages = self._parse_message(msg)
@@ -132,23 +196,28 @@ class ClaudeService:
             # in a different context, causing "cancel scope in different task" errors
             if not generator_closed:
                 try:
-                    await client.disconnect()
+                    await self.disconnect()
                 except RuntimeError as e:
                     # Ignore cancel scope errors that occur during cleanup
                     if "cancel scope" not in str(e).lower():
                         raise
     
-    async def chat(self, prompt: str) -> list[ChatMessage]:
+    async def chat(
+        self,
+        prompt: str,
+        session_id: Optional[str] = None,
+    ) -> list[ChatMessage]:
         """Send a message and get all responses.
         
         Args:
             prompt: User message to send
+            session_id: Session ID for multi-turn conversation
             
         Returns:
             List of ChatMessage objects
         """
         messages = []
-        async for msg in self.chat_stream(prompt):
+        async for msg in self.chat_stream(prompt, session_id=session_id):
             messages.append(msg)
         return messages
     
@@ -231,11 +300,15 @@ class ClaudeService:
 
 
 class SessionClaudeManager:
-    """Manager for Claude clients across multiple sessions."""
+    """Manager for Claude clients across multiple sessions with connection reuse."""
+    
+    # Session timeout in seconds (30 minutes)
+    SESSION_TIMEOUT = 1800
     
     def __init__(self):
-        self._clients: dict[str, ClaudeSDKClient] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._contexts: Dict[str, ConversationContext] = {}
+        self._locks: Dict[str, asyncio.Lock] = {}
+        self._cleanup_task: Optional[asyncio.Task] = None
         
     def _get_lock(self, session_id: str) -> asyncio.Lock:
         """Get or create lock for session."""
@@ -243,12 +316,40 @@ class SessionClaudeManager:
             self._locks[session_id] = asyncio.Lock()
         return self._locks[session_id]
     
+    async def get_or_create_context(
+        self,
+        session_id: str,
+        workspace_path: str,
+    ) -> ConversationContext:
+        """Get existing context or create a new one.
+        
+        Args:
+            session_id: Session identifier
+            workspace_path: Working directory path
+            
+        Returns:
+            ConversationContext for the session
+        """
+        async with self._get_lock(session_id):
+            if session_id in self._contexts:
+                context = self._contexts[session_id]
+                context.touch()
+                return context
+                    
+            # Create new context
+            context = ConversationContext(
+                session_id=session_id,
+                workspace_path=workspace_path,
+            )
+            self._contexts[session_id] = context
+            return context
+    
     async def get_service(
         self,
         session_id: str,
         workspace_path: str,
     ) -> ClaudeService:
-        """Get Claude service for a session.
+        """Get Claude service for a session with multi-turn support.
         
         Args:
             session_id: Session identifier
@@ -257,21 +358,75 @@ class SessionClaudeManager:
         Returns:
             ClaudeService instance configured for the session
         """
-        return ClaudeService(workspace_path=workspace_path)
+        context = await self.get_or_create_context(session_id, workspace_path)
+        return ClaudeService(
+            workspace_path=workspace_path,
+            session_id=session_id,  # Pass session_id for multi-turn support
+        )
     
     async def close_session(self, session_id: str):
         """Close and cleanup session client."""
-        if session_id in self._clients:
-            client = self._clients.pop(session_id)
-            await client.disconnect()
-            
-        if session_id in self._locks:
-            del self._locks[session_id]
+        async with self._get_lock(session_id):
+            if session_id in self._contexts:
+                context = self._contexts.pop(session_id)
+                if context.client is not None and context.is_connected:
+                    try:
+                        await context.client.disconnect()
+                    except Exception:
+                        pass  # Ignore errors during cleanup
+                    
+            if session_id in self._locks:
+                del self._locks[session_id]
     
     async def close_all(self):
         """Close all session clients."""
-        for session_id in list(self._clients.keys()):
+        for session_id in list(self._contexts.keys()):
             await self.close_session(session_id)
+    
+    async def cleanup_stale_sessions(self):
+        """Cleanup sessions that have been inactive for too long."""
+        now = datetime.now()
+        stale_sessions = []
+        
+        for session_id, context in self._contexts.items():
+            elapsed = (now - context.last_activity).total_seconds()
+            if elapsed > self.SESSION_TIMEOUT:
+                stale_sessions.append(session_id)
+        
+        for session_id in stale_sessions:
+            await self.close_session(session_id)
+    
+    async def start_cleanup_task(self):
+        """Start background task for cleaning up stale sessions."""
+        async def cleanup_loop():
+            while True:
+                await asyncio.sleep(300)  # Check every 5 minutes
+                await self.cleanup_stale_sessions()
+        
+        if self._cleanup_task is None:
+            self._cleanup_task = asyncio.create_task(cleanup_loop())
+    
+    def get_session_stats(self, session_id: str) -> Optional[dict]:
+        """Get statistics for a session.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Dict with session statistics or None if not found
+        """
+        if session_id not in self._contexts:
+            return None
+            
+        context = self._contexts[session_id]
+        return {
+            "session_id": context.session_id,
+            "workspace_path": context.workspace_path,
+            "created_at": context.created_at.isoformat(),
+            "last_activity": context.last_activity.isoformat(),
+            "message_count": context.message_count,
+            "is_connected": context.is_connected,
+        }
 
 
 # Global session manager instance

@@ -57,7 +57,7 @@ source .venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # 启动服务
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 ### 3. 前端设置
@@ -221,7 +221,7 @@ async for event in client.query(messages):
 **后端**：
 ```bash
 # 查看详细日志
-uvicorn app.main:app --reload --log-level debug
+uvicorn app.main:app  --log-level debug
 ```
 
 **前端**：
