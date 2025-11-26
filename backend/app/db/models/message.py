@@ -83,3 +83,4 @@ class Message(Base):
         """Check if this message involves tool use"""
         return self.tool_name is not None
 
+

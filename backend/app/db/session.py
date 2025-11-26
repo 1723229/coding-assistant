@@ -100,3 +100,4 @@ async def get_async_db_session() -> AsyncSession:
     """
     return AsyncSessionLocal()
 
+

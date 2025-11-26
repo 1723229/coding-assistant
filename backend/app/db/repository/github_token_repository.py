@@ -167,3 +167,4 @@ class GitHubTokenRepository(BaseRepository[GitHubToken, GitHubTokenCreate, None]
         await session.flush()
         return True
 
+

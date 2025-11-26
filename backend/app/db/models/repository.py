@@ -64,3 +64,4 @@ class Repository(Base):
         """Get full repository name (owner/name)"""
         return f"{self.owner}/{self.name}"
 
+

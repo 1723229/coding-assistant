@@ -94,3 +94,4 @@ class PRResponse(BaseModel):
     head_branch: str = Field(..., description="Source branch")
     base_branch: str = Field(..., description="Target branch")
 
+

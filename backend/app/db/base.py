@@ -46,3 +46,4 @@ async def dispose_db():
     """Dispose database engine."""
     await async_engine.dispose()
 
+

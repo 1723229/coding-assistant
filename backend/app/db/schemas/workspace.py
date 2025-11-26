@@ -26,3 +26,4 @@ class FileWriteRequest(BaseModel):
     """Request to write file content"""
     content: str = Field(..., description="File content to write")
 
+

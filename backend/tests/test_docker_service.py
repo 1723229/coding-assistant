@@ -350,3 +350,4 @@ class TestDockerError:
         assert error.details["exit_code"] == 1
 
 
+

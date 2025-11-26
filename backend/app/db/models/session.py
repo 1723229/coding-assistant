@@ -73,3 +73,4 @@ class Session(Base):
         """Update the updated_at timestamp"""
         self.updated_at = datetime.utcnow()
 
+

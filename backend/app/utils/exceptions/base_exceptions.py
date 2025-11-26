@@ -83,3 +83,4 @@ class ForbiddenError(BusinessException):
     def __init__(self, message: str = "Forbidden"):
         super().__init__(message=message, code=403)
 
+

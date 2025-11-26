@@ -76,3 +76,4 @@ class GitHubToken(Base):
         """Check if this is a GitLab token"""
         return self.platform.lower() == "gitlab"
 
+

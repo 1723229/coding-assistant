@@ -150,3 +150,4 @@ class ListResponse(BaseResponse):
             
         return cls(code=ResponseCode.SUCCESS, message=message, data=data)
 
+
