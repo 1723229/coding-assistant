@@ -1,78 +1,36 @@
-"""Session management REST API."""
+"""
+Session management REST API.
+
+Provides endpoints for managing coding assistant sessions.
+"""
 
 import uuid
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
 
-from ..database import get_db
-from ..models import Session, Message
-from ..config import get_settings
+from app.db import get_async_db
+from app.db.schemas import SessionCreate, SessionUpdate, SessionResponse, MessageResponse
+from app.db.repository import SessionRepository, MessageRepository
+from app.config import get_settings
+from app.utils import BaseResponse, NotFoundError
 
 router = APIRouter()
 settings = get_settings()
 
-
-class SessionCreate(BaseModel):
-    """Request model for creating a session."""
-    name: Optional[str] = "New Session"
-    github_repo_url: Optional[str] = None
-    github_branch: Optional[str] = "main"
+# Repository instances
+session_repo = SessionRepository()
+message_repo = MessageRepository()
 
 
-class SessionUpdate(BaseModel):
-    """Request model for updating a session."""
-    name: Optional[str] = None
-    github_repo_url: Optional[str] = None
-    github_branch: Optional[str] = None
-
-
-class SessionResponse(BaseModel):
-    """Response model for session."""
-    id: str
-    name: str
-    created_at: str
-    updated_at: str
-    is_active: bool
-    workspace_path: Optional[str]
-    container_id: Optional[str]
-    github_repo_url: Optional[str]
-    github_branch: Optional[str]
-
-    class Config:
-        from_attributes = True
-
-
-class MessageResponse(BaseModel):
-    """Response model for message."""
-    id: int
-    session_id: str
-    role: str
-    content: str
-    created_at: str
-    tool_name: Optional[str]
-
-    class Config:
-        from_attributes = True
-
-
-@router.get("/")
+@router.get("/", response_model=List[SessionResponse])
 async def list_sessions(
-    skip: int = 0,
-    limit: int = 50,
-    db: AsyncSession = Depends(get_db)
-) -> list[SessionResponse]:
-    """List all sessions."""
-    result = await db.execute(
-        select(Session)
-        .where(Session.is_active == True)
-        .order_by(Session.updated_at.desc())
-        .offset(skip)
-        .limit(limit)
-    )
-    sessions = result.scalars().all()
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(50, ge=1, le=100, description="Maximum number of records"),
+    db: AsyncSession = Depends(get_async_db)
+) -> List[SessionResponse]:
+    """List all active sessions with pagination."""
+    sessions = await session_repo.get_active_sessions(skip=skip, limit=limit)
     return [
         SessionResponse(
             id=s.id,
@@ -89,30 +47,27 @@ async def list_sessions(
     ]
 
 
-@router.post("/")
+@router.post("/", response_model=SessionResponse, status_code=201)
 async def create_session(
     data: SessionCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> SessionResponse:
     """Create a new session with Docker container and optional repo clone."""
-    from ..services.docker_service import docker_service
-    from ..services.github_service import github_service
+    from app.services import docker_service
+    from app.services.github_service import GitHubService
+    from app.db.repository import GitHubTokenRepository
     
     session_id = str(uuid.uuid4())
     workspace_path = str(settings.workspace_base_path / session_id)
     
-    # Create database record
-    session = Session(
-        id=session_id,
-        name=data.name,
+    # Create session in database
+    session = await session_repo.create_session(
+        session_id=session_id,
+        name=data.name or "New Session",
         workspace_path=workspace_path,
         github_repo_url=data.github_repo_url,
-        github_branch=data.github_branch,
+        github_branch=data.github_branch or "main",
     )
-    
-    db.add(session)
-    await db.commit()
-    await db.refresh(session)
     
     try:
         # Create Docker container
@@ -120,22 +75,27 @@ async def create_session(
             session_id=session_id,
             workspace_path=workspace_path
         )
-        session.container_id = container_info.id
+        await session_repo.update_session(session_id, container_id=container_info.id)
         
         # Clone repository in container if provided
         if data.github_repo_url:
             try:
-                await github_service.clone_repo_in_container(
-                    session_id=session_id,
+                # Get GitHub token
+                token_repo = GitHubTokenRepository()
+                token_record = await token_repo.get_latest_token(platform="GitHub")
+                
+                service = GitHubService(token=token_record.token if token_record else None)
+                await service.clone_repo(
                     repo_url=data.github_repo_url,
-                    branch=data.github_branch
+                    target_path=workspace_path,
+                    branch=data.github_branch,
                 )
             except Exception as clone_error:
                 # Log error but don't fail session creation
-                print(f"Failed to clone repo in container: {clone_error}")
+                print(f"Failed to clone repo: {clone_error}")
         
-        await db.commit()
-        await db.refresh(session)
+        # Refresh session data
+        session = await session_repo.get_session_by_id(session_id)
         
     except Exception as e:
         # If container creation fails, session still exists but without container
@@ -154,16 +114,13 @@ async def create_session(
     )
 
 
-@router.get("/{session_id}")
+@router.get("/{session_id}", response_model=SessionResponse)
 async def get_session(
     session_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> SessionResponse:
-    """Get a specific session."""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id)
-    )
-    session = result.scalar_one_or_none()
+    """Get a specific session by ID."""
+    session = await session_repo.get_session_by_id(session_id)
     
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -181,30 +138,26 @@ async def get_session(
     )
 
 
-@router.patch("/{session_id}")
+@router.patch("/{session_id}", response_model=SessionResponse)
 async def update_session(
     session_id: str,
     data: SessionUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> SessionResponse:
     """Update a session."""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id)
-    )
-    session = result.scalar_one_or_none()
+    # Build update dict from non-None values
+    update_data = {}
+    if data.name is not None:
+        update_data["name"] = data.name
+    if data.github_repo_url is not None:
+        update_data["github_repo_url"] = data.github_repo_url
+    if data.github_branch is not None:
+        update_data["github_branch"] = data.github_branch
+    
+    session = await session_repo.update_session(session_id, **update_data)
     
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    if data.name is not None:
-        session.name = data.name
-    if data.github_repo_url is not None:
-        session.github_repo_url = data.github_repo_url
-    if data.github_branch is not None:
-        session.github_branch = data.github_branch
-    
-    await db.commit()
-    await db.refresh(session)
     
     return SessionResponse(
         id=session.id,
@@ -222,39 +175,30 @@ async def update_session(
 @router.delete("/{session_id}")
 async def delete_session(
     session_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Soft delete a session."""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id)
-    )
-    session = result.scalar_one_or_none()
+    success = await session_repo.soft_delete_session(session_id)
     
-    if not session:
+    if not success:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    session.is_active = False
-    await db.commit()
     
     return {"status": "deleted", "session_id": session_id}
 
 
-@router.get("/{session_id}/messages")
+@router.get("/{session_id}/messages", response_model=List[MessageResponse])
 async def get_session_messages(
     session_id: str,
-    skip: int = 0,
-    limit: int = 100,
-    db: AsyncSession = Depends(get_db)
-) -> list[MessageResponse]:
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=500, description="Maximum number of records"),
+    db: AsyncSession = Depends(get_async_db)
+) -> List[MessageResponse]:
     """Get messages for a session."""
-    result = await db.execute(
-        select(Message)
-        .where(Message.session_id == session_id)
-        .order_by(Message.created_at.asc())
-        .offset(skip)
-        .limit(limit)
+    messages = await message_repo.get_session_messages(
+        session_id=session_id,
+        skip=skip,
+        limit=limit,
     )
-    messages = result.scalars().all()
     
     return [
         MessageResponse(
@@ -267,4 +211,3 @@ async def get_session_messages(
         )
         for m in messages
     ]
-

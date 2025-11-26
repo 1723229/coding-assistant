@@ -23,6 +23,7 @@ aiosqlite
 # Configuration
 python-dotenv
 pydantic-settings
+pyyaml
 
 # Utilities
 aiofiles

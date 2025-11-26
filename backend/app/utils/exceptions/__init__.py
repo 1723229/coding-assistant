@@ -1,10 +1,10 @@
 """
-Utilities Module
+Exception Classes
 
-Common utilities, exceptions, and response models.
+Contains all custom exception types for the application.
 """
 
-from .exceptions import (
+from .base_exceptions import (
     BusinessException,
     DatabaseException,
     ValidationException,
@@ -12,22 +12,13 @@ from .exceptions import (
     UnauthorizedError,
     ForbiddenError,
 )
-from .model import (
-    ResponseCode,
-    BaseResponse,
-    ListResponse,
-)
 
 __all__ = [
-    # Exceptions
     "BusinessException",
     "DatabaseException",
     "ValidationException",
     "NotFoundError",
     "UnauthorizedError",
     "ForbiddenError",
-    # Response models
-    "ResponseCode",
-    "BaseResponse",
-    "ListResponse",
 ]
+

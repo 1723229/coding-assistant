@@ -13,7 +13,7 @@ import docker
 from docker.models.containers import Container
 from docker.errors import NotFound, APIError, ImageNotFound
 
-from ..config import get_settings
+from app.config import get_settings, DockerConfig
 
 settings = get_settings()
 

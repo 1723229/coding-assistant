@@ -12,7 +12,7 @@ from enum import Enum
 from github import Github, GithubException
 from git import Repo, GitCommandError
 
-from ..config import get_settings
+from app.config import get_settings, GitHubConfig
 
 settings = get_settings()
 

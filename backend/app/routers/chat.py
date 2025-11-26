@@ -1,36 +1,49 @@
-"""WebSocket chat endpoint with streaming support."""
+"""
+WebSocket chat endpoint with streaming support.
+
+Provides real-time chat functionality with Claude using WebSocket connections.
+"""
 
 import json
 import asyncio
-from typing import Optional
+import logging
+from typing import Optional, Dict
 from datetime import datetime
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
-from ..database import async_session_maker
-from ..models import Session, Message
-from ..services.claude_service import ClaudeService, ChatMessage, session_claude_manager
-from ..config import get_settings
+from app.db import AsyncSessionLocal
+from app.db.models import Session, Message
+from app.db.repository import SessionRepository, MessageRepository
+from app.services import ClaudeService, ChatMessage, session_claude_manager
+from app.config import get_settings
+
+from sqlalchemy import select
 
 router = APIRouter()
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+# Repository instances
+session_repo = SessionRepository()
+message_repo = MessageRepository()
 
 
 class ConnectionManager:
-    """WebSocket connection manager."""
+    """WebSocket connection manager for chat sessions."""
     
     def __init__(self):
-        self.active_connections: dict[str, WebSocket] = {}
+        self.active_connections: Dict[str, WebSocket] = {}
     
     async def connect(self, session_id: str, websocket: WebSocket):
-        """Connect a WebSocket."""
+        """Register a WebSocket connection."""
         self.active_connections[session_id] = websocket
+        logger.info(f"WebSocket connected for session: {session_id}")
     
     def disconnect(self, session_id: str):
-        """Disconnect a WebSocket."""
+        """Unregister a WebSocket connection."""
         if session_id in self.active_connections:
             del self.active_connections[session_id]
+            logger.info(f"WebSocket disconnected for session: {session_id}")
     
     async def send_message(self, session_id: str, message: dict):
         """Send message to specific session."""
@@ -41,6 +54,10 @@ class ConnectionManager:
         """Broadcast message to all connections."""
         for connection in self.active_connections.values():
             await connection.send_json(message)
+    
+    def is_connected(self, session_id: str) -> bool:
+        """Check if session is connected."""
+        return session_id in self.active_connections
 
 
 manager = ConnectionManager()
@@ -48,14 +65,7 @@ manager = ConnectionManager()
 
 def chat_message_to_dict(msg: ChatMessage) -> dict:
     """Convert ChatMessage to dict for JSON serialization."""
-    return {
-        "type": msg.type,
-        "content": msg.content,
-        "tool_name": msg.tool_name,
-        "tool_input": msg.tool_input,
-        "metadata": msg.metadata,
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+    return msg.to_dict()
 
 
 async def save_message(
@@ -66,58 +76,62 @@ async def save_message(
     tool_input: Optional[str] = None,
     tool_result: Optional[str] = None,
 ):
-    """Save message to database."""
-    async with async_session_maker() as db:
-        message = Message(
-            session_id=session_id,
-            role=role,
-            content=content,
-            tool_name=tool_name,
-            tool_input=tool_input,
-            tool_result=tool_result,
-        )
-        db.add(message)
-        await db.commit()
+    """Save message to database using repository."""
+    await message_repo.create_message(
+        session_id=session_id,
+        role=role,
+        content=content,
+        tool_name=tool_name,
+        tool_input=tool_input,
+        tool_result=tool_result,
+    )
 
 
 @router.websocket("/ws/{session_id}")
 async def websocket_chat(websocket: WebSocket, session_id: str):
-    """WebSocket endpoint for chat with streaming responses."""
+    """WebSocket endpoint for chat with streaming responses.
+    
+    Protocol:
+    - Client sends: {"type": "message", "content": "..."}
+    - Client sends: {"type": "ping"}
+    - Client sends: {"type": "interrupt"}
+    - Server sends: {"type": "connected", "session_id": "..."}
+    - Server sends: {"type": "text", "content": "..."}
+    - Server sends: {"type": "tool_use", "tool_name": "...", "tool_input": {...}}
+    - Server sends: {"type": "response_complete"}
+    - Server sends: {"type": "error", "content": "..."}
+    """
     
     # Accept the WebSocket connection FIRST
     await websocket.accept()
-    print(f"[WS] Connection accepted for session: {session_id}")
+    logger.info(f"[WS] Connection accepted for session: {session_id}")
     
-    # Now get session info
+    # Get session info
     try:
-        async with async_session_maker() as db:
-            result = await db.execute(
-                select(Session).where(Session.id == session_id)
-            )
-            session = result.scalar_one_or_none()
-            
-            if not session:
-                print(f"[WS] Session not found: {session_id}")
-                await websocket.send_json({
-                    "type": "error",
-                    "content": f"Session not found: {session_id}",
-                })
-                await websocket.close(code=4004, reason="Session not found")
-                return
-            
-            workspace_path = session.workspace_path
-            print(f"[WS] Found session: {session.name}, workspace: {workspace_path}")
+        session = await session_repo.get_session_by_id(session_id)
+        
+        if not session:
+            logger.warning(f"[WS] Session not found: {session_id}")
+            await websocket.send_json({
+                "type": "error",
+                "content": f"Session not found: {session_id}",
+            })
+            await websocket.close(code=4004, reason="Session not found")
+            return
+        
+        workspace_path = session.workspace_path
+        logger.info(f"[WS] Found session: {session.name}, workspace: {workspace_path}")
+        
     except Exception as e:
-        print(f"[WS] Database error: {e}")
+        logger.error(f"[WS] Database error: {e}")
         await websocket.send_json({
             "type": "error",
             "content": f"Database error: {str(e)}",
         })
-        await websocket.close(code=4005, reason=f"Database error")
+        await websocket.close(code=4005, reason="Database error")
         return
     
     await manager.connect(session_id, websocket)
-    print(f"[WS] Manager registered connection for session: {session_id}")
     
     # Send connection confirmation
     await websocket.send_json({
@@ -125,24 +139,26 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
         "session_id": session_id,
         "message": "Connected to chat session",
     })
-    print(f"[WS] Sent connection confirmation to session: {session_id}")
     
     try:
         while True:
             # Wait for user message
             data = await websocket.receive_json()
-            print(f"[WS] Received data: {data}")
+            logger.debug(f"[WS] Received data: {data}")
             
-            if data.get("type") == "ping":
+            message_type = data.get("type")
+            
+            if message_type == "ping":
                 await websocket.send_json({"type": "pong"})
                 continue
             
-            if data.get("type") == "message":
+            if message_type == "message":
                 user_message = data.get("content", "")
-                print(f"[WS] User message: {user_message[:50]}...")
                 
                 if not user_message.strip():
                     continue
+                
+                logger.info(f"[WS] User message: {user_message[:50]}...")
                 
                 # Save user message
                 await save_message(session_id, "user", user_message)
@@ -164,7 +180,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                 try:
                     async for chat_msg in claude_service.chat_stream(
                         user_message,
-                        session_id=session_id,  # Enable multi-turn conversation
+                        session_id=session_id,
                     ):
                         msg_dict = chat_message_to_dict(chat_msg)
                         await websocket.send_json(msg_dict)
@@ -190,24 +206,29 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                     })
                     
                 except Exception as e:
-                    print(f"[WS] Error during chat: {e}")
+                    logger.error(f"[WS] Error during chat: {e}", exc_info=True)
                     await websocket.send_json({
                         "type": "error",
                         "content": str(e),
                     })
             
-            elif data.get("type") == "interrupt":
+            elif message_type == "interrupt":
                 # Handle interrupt signal
+                claude_service = await session_claude_manager.get_service(
+                    session_id=session_id,
+                    workspace_path=workspace_path,
+                )
+                await claude_service.interrupt()
                 await websocket.send_json({
                     "type": "interrupted",
                     "message": "Request interrupted",
                 })
     
     except WebSocketDisconnect:
-        print(f"[WS] Client disconnected: {session_id}")
+        logger.info(f"[WS] Client disconnected: {session_id}")
         manager.disconnect(session_id)
     except Exception as e:
-        print(f"[WS] Error: {e}")
+        logger.error(f"[WS] Error: {e}", exc_info=True)
         manager.disconnect(session_id)
         raise
 
@@ -215,21 +236,30 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
 @router.get("/history/{session_id}")
 async def get_chat_history(session_id: str):
     """Get chat history for a session."""
-    async with async_session_maker() as db:
-        result = await db.execute(
-            select(Message)
-            .where(Message.session_id == session_id)
-            .order_by(Message.created_at.asc())
-        )
-        messages = result.scalars().all()
-        
-        return [
-            {
-                "id": m.id,
-                "role": m.role,
-                "content": m.content,
-                "tool_name": m.tool_name,
-                "created_at": m.created_at.isoformat(),
-            }
-            for m in messages
-        ]
+    messages = await message_repo.get_session_messages(session_id=session_id)
+    
+    return [
+        {
+            "id": m.id,
+            "role": m.role,
+            "content": m.content,
+            "tool_name": m.tool_name,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in messages
+    ]
+
+
+@router.get("/stats/{session_id}")
+async def get_session_stats(session_id: str):
+    """Get Claude session statistics."""
+    stats = session_claude_manager.get_session_stats(session_id)
+    if stats is None:
+        return {"session_id": session_id, "status": "not_found"}
+    return stats
+
+
+@router.get("/stats")
+async def get_all_stats():
+    """Get all Claude session statistics."""
+    return session_claude_manager.get_all_stats()

@@ -1,0 +1,70 @@
+# Coding Assistant Configuration
+# Copy this file to config.yaml and modify as needed
+
+# Database Configuration
+database:
+  # SQLite (default for development)
+  type: sqlite
+  path: ./data/app.db
+  
+  # PostgreSQL (for production)
+  # type: postgresql
+  # host: localhost
+  # port: 5432
+  # user: postgres
+  # password: ""
+  # name: coding_assistant
+  # pool_size: 10
+  # max_overflow: 20
+
+# Server Configuration
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+  debug: false
+  cors_origins:
+    - "http://localhost:5173"
+    - "http://localhost:3000"
+
+# Claude Configuration
+claude:
+  # API Settings
+  api_key: ""
+  base_url: "https://api.anthropic.com"
+  
+  # Default tools for Claude Code
+  default_tools:
+    - "Read"
+    - "Write"
+    - "Edit"
+    - "MultiEdit"
+    - "Bash"
+    - "Glob"
+    - "Grep"
+    - "LS"
+    - "TodoRead"
+    - "TodoWrite"
+  
+  # Permission mode: acceptEdits, bypassPermissions, etc.
+  permission_mode: "acceptEdits"
+  
+  # Session settings
+  session_timeout: 1800  # 30 minutes
+
+# GitHub Configuration
+github:
+  token: ""
+  default_repo: ""
+
+# Workspace Configuration
+workspace:
+  base_path: "./workspaces"
+
+# Docker Configuration (optional)
+docker:
+  image: "claude-workspace:latest"
+  network: "claude-network"
+  memory_limit: "2g"
+  cpu_quota: 100000
+

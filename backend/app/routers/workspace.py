@@ -1,43 +1,34 @@
-"""Workspace file operations API."""
+"""
+Workspace file operations API.
+
+Provides endpoints for file system operations within session workspaces.
+"""
 
 import os
 import aiofiles
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
 
-from ..database import get_db
-from ..models import Session
-from ..config import get_settings
+from app.db import get_async_db
+from app.db.schemas import FileInfo, FileContent, FileWriteRequest
+from app.db.repository import SessionRepository
+from app.config import get_settings
 
 router = APIRouter()
 settings = get_settings()
 
-
-class FileInfo(BaseModel):
-    """File information model."""
-    name: str
-    path: str
-    is_directory: bool
-    size: Optional[int] = None
-
-
-class FileContent(BaseModel):
-    """File content model."""
-    path: str
-    content: str
-
-
-class FileWriteRequest(BaseModel):
-    """Request to write file content."""
-    content: str
+# Repository instance
+session_repo = SessionRepository()
 
 
 def get_safe_path(workspace_path: str, relative_path: str) -> Path:
-    """Get safe absolute path within workspace."""
+    """Get safe absolute path within workspace.
+    
+    Prevents path traversal attacks by ensuring the resolved path
+    is within the workspace directory.
+    """
     workspace = Path(workspace_path).resolve()
     target = (workspace / relative_path).resolve()
     
@@ -48,17 +39,14 @@ def get_safe_path(workspace_path: str, relative_path: str) -> Path:
     return target
 
 
-@router.get("/{session_id}/files")
+@router.get("/{session_id}/files", response_model=List[FileInfo])
 async def list_files(
     session_id: str,
     path: str = Query(default="", description="Relative path within workspace"),
-    db: AsyncSession = Depends(get_db)
-) -> list[FileInfo]:
+    db: AsyncSession = Depends(get_async_db)
+) -> List[FileInfo]:
     """List files in workspace directory."""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id)
-    )
-    session = result.scalar_one_or_none()
+    session = await session_repo.get_session_by_id(session_id)
     
     if not session or not session.workspace_path:
         raise HTTPException(status_code=404, detail="Session or workspace not found")
@@ -94,17 +82,14 @@ async def list_files(
     return files
 
 
-@router.get("/{session_id}/files/content")
+@router.get("/{session_id}/files/content", response_model=FileContent)
 async def get_file_content(
     session_id: str,
     path: str = Query(..., description="Relative path to file"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> FileContent:
     """Get file content."""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id)
-    )
-    session = result.scalar_one_or_none()
+    session = await session_repo.get_session_by_id(session_id)
     
     if not session or not session.workspace_path:
         raise HTTPException(status_code=404, detail="Session or workspace not found")
@@ -118,7 +103,8 @@ async def get_file_content(
         raise HTTPException(status_code=400, detail="Path is not a file")
     
     # Check file size (limit to 1MB)
-    if target_path.stat().st_size > 1024 * 1024:
+    max_size = 1024 * 1024  # 1MB
+    if target_path.stat().st_size > max_size:
         raise HTTPException(status_code=413, detail="File too large")
     
     try:
@@ -130,18 +116,15 @@ async def get_file_content(
     return FileContent(path=path, content=content)
 
 
-@router.put("/{session_id}/files/content")
+@router.put("/{session_id}/files/content", response_model=FileContent)
 async def write_file_content(
     session_id: str,
     path: str = Query(..., description="Relative path to file"),
     data: FileWriteRequest = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> FileContent:
     """Write file content."""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id)
-    )
-    session = result.scalar_one_or_none()
+    session = await session_repo.get_session_by_id(session_id)
     
     if not session or not session.workspace_path:
         raise HTTPException(status_code=404, detail="Session or workspace not found")
@@ -161,13 +144,10 @@ async def write_file_content(
 async def delete_file(
     session_id: str,
     path: str = Query(..., description="Relative path to file"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Delete a file or directory."""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id)
-    )
-    session = result.scalar_one_or_none()
+    session = await session_repo.get_session_by_id(session_id)
     
     if not session or not session.workspace_path:
         raise HTTPException(status_code=404, detail="Session or workspace not found")
@@ -186,17 +166,14 @@ async def delete_file(
     return {"status": "deleted", "path": path}
 
 
-@router.post("/{session_id}/files/mkdir")
+@router.post("/{session_id}/files/mkdir", response_model=FileInfo)
 async def create_directory(
     session_id: str,
     path: str = Query(..., description="Relative path for new directory"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ) -> FileInfo:
     """Create a directory."""
-    result = await db.execute(
-        select(Session).where(Session.id == session_id)
-    )
-    session = result.scalar_one_or_none()
+    session = await session_repo.get_session_by_id(session_id)
     
     if not session or not session.workspace_path:
         raise HTTPException(status_code=404, detail="Session or workspace not found")
@@ -214,3 +191,48 @@ async def create_directory(
         is_directory=True,
     )
 
+
+@router.get("/{session_id}/files/tree")
+async def get_file_tree(
+    session_id: str,
+    max_depth: int = Query(3, ge=1, le=10, description="Maximum depth to traverse"),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Get file tree structure for workspace."""
+    session = await session_repo.get_session_by_id(session_id)
+    
+    if not session or not session.workspace_path:
+        raise HTTPException(status_code=404, detail="Session or workspace not found")
+    
+    workspace_path = Path(session.workspace_path).resolve()
+    
+    if not workspace_path.exists():
+        return {"name": workspace_path.name, "path": "", "children": []}
+    
+    def build_tree(path: Path, current_depth: int) -> dict:
+        """Recursively build file tree."""
+        rel_path = str(path.relative_to(workspace_path)) if path != workspace_path else ""
+        
+        node = {
+            "name": path.name or workspace_path.name,
+            "path": rel_path,
+            "is_directory": path.is_dir(),
+        }
+        
+        if path.is_dir() and current_depth < max_depth:
+            children = []
+            try:
+                for item in sorted(path.iterdir()):
+                    # Skip hidden files and common ignore patterns
+                    if item.name.startswith('.') or item.name in ['__pycache__', 'node_modules', '.git']:
+                        continue
+                    children.append(build_tree(item, current_depth + 1))
+            except PermissionError:
+                pass
+            node["children"] = children
+        elif path.is_file():
+            node["size"] = path.stat().st_size
+        
+        return node
+    
+    return build_tree(workspace_path, 0)
