@@ -29,7 +29,7 @@ export function GitHubSettings({ onClose }: GitHubSettingsProps) {
     const loadTokens = async () => {
         try {
             setIsLoading(true);
-            const response = await fetch('/api/github/tokens');
+            const response = await fetch('/api/code/github/tokens');
             if (response.ok) {
                 const data = await response.json();
                 setTokens(data);
@@ -52,7 +52,7 @@ export function GitHubSettings({ onClose }: GitHubSettingsProps) {
             setIsLoading(true);
             setError(null);
 
-            const response = await fetch('/api/github/tokens', {
+            const response = await fetch('/api/code/github/tokens', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ platform, domain, token }),
@@ -81,7 +81,7 @@ export function GitHubSettings({ onClose }: GitHubSettingsProps) {
 
         try {
             setIsLoading(true);
-            const response = await fetch(`/api/github/tokens/${tokenId}`, {
+            const response = await fetch(`/api/code/github/tokens/${tokenId}`, {
                 method: 'DELETE',
             });
 
