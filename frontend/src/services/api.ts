@@ -11,7 +11,7 @@ import type {
     GitHubToken
 } from '../types';
 
-const API_BASE = '/api';
+const API_BASE = '/api/code';
 
 // Response interface matching backend BaseResponse
 interface ApiResponse<T> {

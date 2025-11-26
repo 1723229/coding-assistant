@@ -134,48 +134,11 @@ def create_app() -> FastAPI:
     # Register global exception handlers
     register_exception_handlers(app)
 
-    # Health check endpoints
-    @app.get("/", tags=["system"])
-    async def root():
-        """Root endpoint - health check"""
-        from app.utils.model import BaseResponse
-        return BaseResponse.success(data={
-            "status": "ok",
-            "app": "Claude Code Web Platform",
-            "version": "1.0.0",
-        })
-
-    @app.get("/health", tags=["system"])
-    async def health_check():
-        """Detailed health check endpoint"""
-        from app.utils.model import BaseResponse
-        return BaseResponse.success(data={
-            "status": "healthy",
-            "version": "1.0.0",
-            "services": {
-                "database": "connected",
-                "claude_sdk": "configured",
-            }
-        })
-
-    @app.get("/api/health", tags=["system"])
-    async def api_health_check():
-        """API health check endpoint"""
-        from app.utils.model import BaseResponse
-        return BaseResponse.success(data={
-            "status": "healthy",
-            "version": "1.0.0",
-            "services": {
-                "database": "connected",
-                "claude_sdk": "configured",
-            }
-        })
-
     # Include routers with /api prefix
-    app.include_router(session_router, prefix="/api")
-    app.include_router(chat_router, prefix="/api")
-    app.include_router(github_router, prefix="/api")
-    app.include_router(workspace_router, prefix="/api")
+    app.include_router(session_router, prefix="/api/code")
+    app.include_router(chat_router, prefix="/api/code")
+    app.include_router(github_router, prefix="/api/code")
+    app.include_router(workspace_router, prefix="/api/code")
 
     return app
 
