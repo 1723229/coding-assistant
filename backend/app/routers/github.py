@@ -358,14 +358,25 @@ async def pull_changes(
     db: AsyncSession = Depends(get_db),
 ):
     """Pull changes from remote."""
+    from pathlib import Path
+
     result = await db.execute(
         select(Session).where(Session.id == session_id)
     )
     session = result.scalar_one_or_none()
-    
+
     if not session or not session.workspace_path:
         raise HTTPException(status_code=404, detail="Session or workspace not found")
-    
+
+    # Check if workspace is a valid git repository
+    workspace = Path(session.workspace_path)
+    git_dir = workspace / ".git"
+    if not git_dir.exists():
+        raise HTTPException(
+            status_code=400,
+            detail="No git repository found. Please clone a repository first."
+        )
+
     # Get the active GitHub token from database
     token_result = await db.execute(
         select(GitHubToken).where(
@@ -374,10 +385,10 @@ async def pull_changes(
         ).order_by(GitHubToken.created_at.desc()).limit(1)
     )
     token_record = token_result.scalar_one_or_none()
-    
+
     # Create a service instance with the user's token
     service = GitHubService(token=token_record.token if token_record else None)
-    
+
     try:
         await service.pull_changes(session.workspace_path)
         return {"status": "pulled"}
@@ -533,11 +544,30 @@ async def delete_github_token(
 async def list_user_repos(
     query: Optional[str] = None,
     page: int = 1,
+    db: AsyncSession = Depends(get_db),
 ) -> list[RepoInfoResponse]:
     """List user's GitHub repositories."""
+    # Get the active GitHub token from database
+    token_result = await db.execute(
+        select(GitHubToken).where(
+            GitHubToken.is_active == True,
+            GitHubToken.platform == "GitHub"
+        ).order_by(GitHubToken.created_at.desc()).limit(1)
+    )
+    token_record = token_result.scalar_one_or_none()
+    
+    if not token_record:
+        raise HTTPException(
+            status_code=400, 
+            detail="Failed to load repositories. Please check your GitHub token."
+        )
+    
+    # Create a service instance with the user's token
+    service = GitHubService(token=token_record.token)
+    
     try:
         # Use GitHub API to list user repos
-        repos = await github_service.list_user_repos(query=query, page=page)
+        repos = await service.list_user_repos(query=query, page=page)
         return [
             RepoInfoResponse(
                 name=r.name,

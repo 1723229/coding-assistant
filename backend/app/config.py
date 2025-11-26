@@ -14,13 +14,13 @@ class Settings(BaseSettings):
     debug: bool = False
     
     # API Configuration
-    anthropic_api_key: str = ""
+    anthropic_api_key: str = "sk-ww6QLSsRmcFO2mUQHFKqll35xJe4jCqwqDFqTShWIccudM2g"
     anthropic_base_url: str = "https://api.moonshot.cn/anthropic/"
-    
+
     # GitHub Configuration
-    github_token: str = ""
+    github_token: str = "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"
     github_default_repo: str = ""
-    
+
     # Database
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
     
