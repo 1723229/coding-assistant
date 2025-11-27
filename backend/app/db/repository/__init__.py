@@ -8,12 +8,18 @@ from .base_repository import BaseRepository
 from .session_repository import SessionRepository
 from .message_repository import MessageRepository
 from .github_token_repository import GitHubTokenRepository
+from .project_repository import ProjectRepository
+from .module_repository import ModuleRepository
+from .version_repository import VersionRepository
 
 __all__ = [
     "BaseRepository",
     "SessionRepository",
     "MessageRepository",
     "GitHubTokenRepository",
+    "ProjectRepository",
+    "ModuleRepository",
+    "VersionRepository",
 ]
 
 

@@ -35,6 +35,9 @@ from app.api import (
     chat_router,
     github_router,
     workspace_router,
+    project_router,
+    module_router,
+    version_router,
 )
 
 # Initialize logging
@@ -139,6 +142,9 @@ def create_app() -> FastAPI:
     app.include_router(chat_router, prefix="/api/code")
     app.include_router(github_router, prefix="/api/code")
     app.include_router(workspace_router, prefix="/api/code")
+    app.include_router(project_router, prefix="/api/code")
+    app.include_router(module_router, prefix="/api/code")
+    app.include_router(version_router, prefix="/api/code")
 
     return app
 
