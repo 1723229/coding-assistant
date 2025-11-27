@@ -5,52 +5,25 @@ GitHub相关的API路由定义
 只负责路由定义，所有业务逻辑在service层
 """
 
-from typing import Optional, List
+from typing import Optional
 from fastapi import APIRouter, Query, Path, Body
-from pydantic import BaseModel
 
 from app.service.github_api_service import GitHubApiService
-from app.db.schemas import GitHubTokenCreate
+from app.db.schemas import (
+    GitHubTokenCreate,
+    CloneRepoRequest,
+    CommitRequest,
+    PushRequest,
+    CreateBranchRequest,
+    CheckoutBranchRequest,
+    CreatePRRequest,
+)
 
 # 创建路由器
 github_router = APIRouter(prefix="/github", tags=["github"])
 
 # 创建service实例
 github_service = GitHubApiService()
-
-
-# ===================
-# Request Models
-# ===================
-
-class CloneRepoRequest(BaseModel):
-    repo_url: str
-    branch: Optional[str] = None
-
-
-class CommitRequest(BaseModel):
-    message: str
-    files: Optional[List[str]] = None
-
-
-class PushRequest(BaseModel):
-    branch: Optional[str] = None
-
-
-class CreateBranchRequest(BaseModel):
-    branch_name: str
-    checkout: bool = True
-
-
-class CheckoutBranchRequest(BaseModel):
-    branch_name: str
-
-
-class CreatePRRequest(BaseModel):
-    title: str
-    body: str
-    head_branch: str
-    base_branch: Optional[str] = None
 
 
 # ===================

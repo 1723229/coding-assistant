@@ -6,24 +6,15 @@ Workspace API Router
 """
 
 from fastapi import APIRouter, Query, Path, Body
-from pydantic import BaseModel
 
 from app.service.workspace_service import WorkspaceService
+from app.db.schemas import WriteFileRequest
 
 # 创建路由器
 workspace_router = APIRouter(prefix="/workspace", tags=["workspace"])
 
 # 创建service实例
 workspace_service = WorkspaceService()
-
-
-# ===================
-# Request Models
-# ===================
-
-class WriteFileRequest(BaseModel):
-    path: str
-    content: str
 
 
 # ===================

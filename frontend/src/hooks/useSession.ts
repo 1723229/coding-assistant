@@ -123,7 +123,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     fetchFiles: async (path = '') => {
         const { currentSession } = get();
-        if (!currentSession) return;
+        if (!currentSession || !currentSession.id) return;
 
         set({ isLoadingFiles: true });
         try {
@@ -137,7 +137,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     selectFile: async (path) => {
         const { currentSession } = get();
-        if (!currentSession) return;
+        if (!currentSession || !currentSession.id) return;
 
         try {
             const file = await workspaceApi.getFileContent(currentSession.id, path);
@@ -149,7 +149,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     saveFile: async (path, content) => {
         const { currentSession } = get();
-        if (!currentSession) return;
+        if (!currentSession || !currentSession.id) return;
 
         await workspaceApi.writeFileContent(currentSession.id, path, content);
         set({ currentFile: { path, content } });

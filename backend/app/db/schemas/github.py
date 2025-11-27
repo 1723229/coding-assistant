@@ -67,6 +67,11 @@ class CreatePRRequest(BaseModel):
     base_branch: Optional[str] = Field(None, description="Target branch")
 
 
+class CheckoutBranchRequest(BaseModel):
+    """Request to checkout a branch"""
+    branch_name: str = Field(..., description="Branch name to checkout")
+
+
 class RepoInfoResponse(BaseModel):
     """Repository information response"""
     name: str = Field(..., description="Repository name")

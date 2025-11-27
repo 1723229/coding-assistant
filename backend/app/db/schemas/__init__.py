@@ -20,6 +20,7 @@ from .github import (
     CommitRequest,
     PushRequest,
     CreateBranchRequest,
+    CheckoutBranchRequest,
     CreatePRRequest,
     RepoInfoResponse,
     FileChangeResponse,
@@ -29,6 +30,7 @@ from .workspace import (
     FileInfo,
     FileContent,
     FileWriteRequest,
+    WriteFileRequest,
 )
 
 __all__ = [
@@ -46,6 +48,7 @@ __all__ = [
     "CommitRequest",
     "PushRequest",
     "CreateBranchRequest",
+    "CheckoutBranchRequest",
     "CreatePRRequest",
     "RepoInfoResponse",
     "FileChangeResponse",
@@ -54,6 +57,7 @@ __all__ = [
     "FileInfo",
     "FileContent",
     "FileWriteRequest",
+    "WriteFileRequest",
 ]
 
 

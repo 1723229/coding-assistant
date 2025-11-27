@@ -80,10 +80,14 @@ class WorkspaceService:
                 # 跳过隐藏文件
                 if item.name.startswith('.'):
                     continue
-                
+
+                # 构建相对路径
+                relative_item_path = str(Path(path) / item.name) if path else item.name
+
                 items.append({
                     "name": item.name,
-                    "type": "directory" if item.is_dir() else "file",
+                    "path": relative_item_path,
+                    "is_directory": item.is_dir(),
                     "size": item.stat().st_size if item.is_file() else None,
                 })
             
