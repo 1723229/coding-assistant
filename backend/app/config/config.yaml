@@ -36,16 +36,22 @@ claude:
   
   # Default tools for Claude Code
   default_tools:
+    - "Task"
+    - "Bash"
+    - "Edit"
     - "Read"
     - "Write"
-    - "Edit"
-    - "MultiEdit"
-    - "Bash"
     - "Glob"
     - "Grep"
-    - "LS"
-    - "TodoRead"
+    - "NotebookEdit"
+    - "WebFetch"
+    - "WebSearch"
     - "TodoWrite"
+    - "BashOutput"
+    - "KillBash"
+    - "ExitPlanMode"
+    - "ListMcpResources"
+    - "ReadMcpResource"
   
   # Permission mode: acceptEdits, bypassPermissions, etc.
   permission_mode: "acceptEdits"
