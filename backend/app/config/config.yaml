@@ -33,7 +33,10 @@ claude:
   # API Settings
   api_key: "sk-ww6QLSsRmcFO2mUQHFKqll35xJe4jCqwqDFqTShWIccudM2g"
   base_url: "https://api.moonshot.cn/anthropic/"
-  
+
+  # Model selection
+  model: "claude-sonnet-4-5-20250929"
+
   # Default tools for Claude Code
   default_tools:
     - "Task"

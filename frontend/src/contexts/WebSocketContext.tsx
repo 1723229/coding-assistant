@@ -1,82 +1,82 @@
 /**
- * WebSocket Context - 全局状态管理
+ * SSE Context - 全局状态管理（使用Server-Sent Events）
  */
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { wsManager } from '../lib/websocket';
+import { createContext, useContext, useState, ReactNode } from 'react';
+import { sseManager } from '../lib/sse';
 
-interface WebSocketContextValue {
+interface SSEContextValue {
     isConnected: boolean;
     currentSessionId: string | null;
     connect: (sessionId: string) => void;
     disconnect: () => void;
-    send: (content: string) => boolean;
+    send: (content: string) => Promise<boolean>;
     interrupt: () => void;
 }
 
-const WebSocketContext = createContext<WebSocketContextValue | null>(null);
+const SSEContext = createContext<SSEContextValue | null>(null);
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
     const [isConnected, setIsConnected] = useState(false);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
-    useEffect(() => {
-        if (!currentSessionId) {
-            setIsConnected(false);
-            return;
-        }
-
-        // 初始状态
-        setIsConnected(wsManager.isConnected(currentSessionId));
-
-        // 监听连接
-        const unsubConnect = wsManager.onConnect(currentSessionId, () => {
-            setIsConnected(true);
-        });
-
-        // 监听断开
-        const unsubDisconnect = wsManager.onDisconnect(currentSessionId, () => {
-            setIsConnected(false);
-        });
-
-        // 建立连接
-        wsManager.connect(currentSessionId);
-
-        return () => {
-            unsubConnect();
-            unsubDisconnect();
-        };
-    }, [currentSessionId]);
-
     const connect = (sessionId: string) => {
         if (currentSessionId !== sessionId) {
             if (currentSessionId) {
-                wsManager.disconnect(currentSessionId);
+                sseManager.disconnect(currentSessionId);
             }
             setCurrentSessionId(sessionId);
+            // SSE不需要预先建立连接，有session就视为可连接
+            setIsConnected(true);
         }
     };
 
     const disconnect = () => {
         if (currentSessionId) {
-            wsManager.disconnect(currentSessionId);
+            sseManager.disconnect(currentSessionId);
             setCurrentSessionId(null);
+            setIsConnected(false);
         }
     };
 
-    const send = (content: string): boolean => {
+    const send = async (content: string): Promise<boolean> => {
         if (!currentSessionId) return false;
-        return wsManager.send(currentSessionId, content);
+
+        // 发送时设置为processing状态
+        setIsConnected(true);
+
+        // 注册一次性的连接和断开处理器
+        const handleConnect = () => {
+            console.log('[SSE] Connected');
+        };
+
+        const handleDisconnect = () => {
+            console.log('[SSE] Disconnected');
+            // 断开后恢复可用状态（SSE是请求驱动的）
+            setIsConnected(true);
+        };
+
+        const unsubConnect = sseManager.onConnect(currentSessionId, handleConnect);
+        const unsubDisconnect = sseManager.onDisconnect(currentSessionId, handleDisconnect);
+
+        try {
+            const result = await sseManager.send(currentSessionId, content);
+            return result;
+        } finally {
+            // 清理处理器
+            unsubConnect();
+            unsubDisconnect();
+        }
     };
 
     const interrupt = () => {
         if (currentSessionId) {
-            wsManager.interrupt(currentSessionId);
+            sseManager.interrupt(currentSessionId);
         }
     };
 
     return (
-        <WebSocketContext.Provider
+        <SSEContext.Provider
             value={{
                 isConnected,
                 currentSessionId,
@@ -87,12 +87,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             }}
         >
             {children}
-        </WebSocketContext.Provider>
+        </SSEContext.Provider>
     );
 }
 
 export function useWebSocketContext() {
-    const context = useContext(WebSocketContext);
+    const context = useContext(SSEContext);
     if (!context) {
         throw new Error('useWebSocketContext must be used within WebSocketProvider');
     }

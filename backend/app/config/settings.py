@@ -129,8 +129,11 @@ class ClaudeConfig:
     _claude_config = _config.get("claude", {})
 
     # API Settings
-    API_KEY = _claude_config.get("api_key", "")
-    BASE_URL = _claude_config.get("base_url", "https://api.anthropic.com")
+    API_KEY = _claude_config.get("api_key")
+    BASE_URL = _claude_config.get("base_url")
+
+    # Model selection
+    MODEL = _claude_config.get("model")
 
     # Default tools
     DEFAULT_TOOLS = _claude_config.get("default_tools", [
@@ -220,6 +223,7 @@ class Settings(BaseSettings):
     # API Configuration
     anthropic_api_key: str = ClaudeConfig.API_KEY
     anthropic_base_url: str = ClaudeConfig.BASE_URL
+    anthropic_model: str = ClaudeConfig.MODEL
 
     # GitHub Configuration
     github_token: str = GitHubConfig.TOKEN

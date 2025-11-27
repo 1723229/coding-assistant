@@ -9,7 +9,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useSessionStore } from '../../hooks/useSession';
 import { useWebSocketContext } from '../../contexts/WebSocketContext';
-import { wsManager } from '../../lib/websocket';
+import { sseManager } from '../../lib/sse';
 import { EventMessage } from './EventMessage';
 import type { ChatMessage, Message } from '../../types';
 
@@ -23,18 +23,18 @@ export function ChatPanel() {
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const lastScrollTimeRef = useRef<number>(0);
 
-    // 当 session 变化时，连接 WebSocket
+    // 当 session 变化时，注册SSE消息处理
     useEffect(() => {
         if (currentSession?.id) {
             connect(currentSession.id);
 
             // 注册消息处理
-            const unsubscribe = wsManager.onMessage(currentSession.id, handleMessage);
+            const unsubscribe = sseManager.onMessage(currentSession.id, handleMessage);
             return () => unsubscribe();
         }
     }, [currentSession?.id, connect]);
 
-    // 处理 WebSocket 消息
+    // 处理 SSE 消息
     const handleMessage = useCallback((msg: ChatMessage) => {
         const timestamp = new Date().toISOString();
 
@@ -156,21 +156,25 @@ export function ChatPanel() {
         }
     }, [messages, isStreaming]);
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const content = input.trim();
 
-        if (!content || !isConnected || isProcessing) {
+        if (!content || isProcessing) {
             return;
         }
 
         const userMessage: Message = { role: 'user', content };
         addMessage(userMessage);
 
-        const sent = send(content);
-        if (sent) {
-            setInput('');
-            setIsProcessing(true);
+        setIsProcessing(true);
+        setInput('');
+
+        const sent = await send(content);
+        if (!sent) {
+            setIsProcessing(false);
+            // 可以添加错误提示
+            console.error('Failed to send message');
         }
     };
 

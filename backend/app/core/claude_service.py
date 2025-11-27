@@ -73,6 +73,15 @@ class ChatMessage:
             "timestamp": self.timestamp,
         }
 
+PUPPETEER_TOOLS = [
+    "mcp__puppeteer__puppeteer_navigate",
+    "mcp__puppeteer__puppeteer_screenshot",
+    "mcp__puppeteer__puppeteer_click",
+    "mcp__puppeteer__puppeteer_fill",
+    "mcp__puppeteer__puppeteer_select",
+    "mcp__puppeteer__puppeteer_hover",
+    "mcp__puppeteer__puppeteer_evaluate",
+]
 
 @dataclass
 class ConversationContext:
@@ -126,7 +135,11 @@ class ClaudeService:
             system_prompt: Custom system prompt configuration
         """
         self.workspace_path = workspace_path
-        self.allowed_tools = allowed_tools or ClaudeConfig.DEFAULT_TOOLS.copy()
+        BUILTIN_TOOLS = allowed_tools or ClaudeConfig.DEFAULT_TOOLS.copy()
+        self.allowed_tools = [
+            *BUILTIN_TOOLS,
+            *PUPPETEER_TOOLS,
+        ]
         self.session_id = session_id
         self.permission_mode = permission_mode or ClaudeConfig.PERMISSION_MODE
         self.system_prompt = system_prompt
@@ -151,6 +164,10 @@ class ClaudeService:
             permission_mode=self.permission_mode,
             cwd=self.workspace_path,
             include_partial_messages=True,  # Enable streaming partial messages
+            model=ClaudeConfig.MODEL,  # Use configured model
+            mcp_servers={
+                "puppeteer": {"command": "npx", "args": ["puppeteer-mcp-server"]}
+            },
         )
         return options
     
