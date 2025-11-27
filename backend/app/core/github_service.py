@@ -448,11 +448,19 @@ class GitHubService:
         
         target.mkdir(parents=True, exist_ok=True)
         
+        # Configure Git for HTTP/1.1 to avoid HTTP/2 framing issues
+        import subprocess
+        await asyncio.to_thread(
+            subprocess.run,
+            ["git", "config", "--global", "http.version", "HTTP/1.1"],
+            check=False,  # Don't fail if already set
+        )
+
         # Clone repository
         clone_kwargs = {}
         if branch:
             clone_kwargs["branch"] = branch
-        
+
         repo = await asyncio.to_thread(
             Repo.clone_from,
             clone_url,
