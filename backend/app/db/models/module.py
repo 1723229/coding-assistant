@@ -23,10 +23,10 @@ class Module(Base, BaseModel):
 
     支持树形结构的项目模块管理
     """
-    __tablename__ = "modules"
+    __tablename__ = "code_module"
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True, comment="Primary Key ID")
-    project_id = Column(BigInteger, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, comment="所属项目ID")
+    project_id = Column(BigInteger, ForeignKey("code_project.id", ondelete="CASCADE"), nullable=False, comment="所属项目ID")
     parent_id = Column(BigInteger, nullable=True, comment="父节点ID，空则为根节点")
     type = Column(SQLEnum(ModuleType), nullable=False, comment="模块类型：MENU-菜单项 PAGE-页面")
     name = Column(String(255), nullable=False, comment="模块名称")
@@ -35,7 +35,7 @@ class Module(Base, BaseModel):
     branch = Column(String(128), nullable=True, comment="Git分支")
 
     # Relationships
-    project = relationship("Project", backref="modules")
+    # project = relationship("Project", backref="code_module")
 
     # Indexes
     __table_args__ = (
