@@ -16,6 +16,7 @@ class ProjectBase(BaseModel):
     codebase: str = Field(..., max_length=512, description="Git仓库地址")
     token: str = Field(..., max_length=512, description="Git认证令牌")
     owner: int = Field(..., description="持有者ID")
+    branch: Optional[str] = Field("main", max_length=128, description="Git分支，默认为main")
 
     @field_validator("code")
     @classmethod
@@ -38,6 +39,8 @@ class ProjectUpdate(BaseModel):
     codebase: Optional[str] = Field(None, max_length=512, description="Git仓库地址")
     token: Optional[str] = Field(None, max_length=512, description="Git认证令牌")
     owner: Optional[int] = Field(None, description="持有者ID")
+    branch: Optional[str] = Field(None, max_length=128, description="Git分支")
+    is_active: Optional[int] = Field(None, description="是否激活")
 
     @field_validator("code")
     @classmethod
@@ -53,6 +56,10 @@ class ProjectUpdate(BaseModel):
 class ProjectResponse(ProjectBase):
     """Schema for project response"""
     id: int
+    session_id: str
+    workspace_path: Optional[str] = None
+    container_id: Optional[str] = None
+    is_active: int = 1
     create_time: Optional[datetime] = None
     update_time: Optional[datetime] = None
     create_by: Optional[str] = None
