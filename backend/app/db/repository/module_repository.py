@@ -41,6 +41,17 @@ class ModuleRepository(BaseRepository[Module, ModuleCreate, ModuleUpdate]):
         return result.scalar_one_or_none()
 
     @async_with_session
+    async def get_module_by_session_id(
+        self,
+        session: AsyncSession,
+        session_id: str
+    ) -> Optional[Module]:
+        """Get POINT type module by session_id"""
+        stmt = select(Module).where(Module.session_id == session_id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    @async_with_session
     async def get_modules_by_project(
         self,
         session: AsyncSession,
@@ -145,7 +156,13 @@ class ModuleRepository(BaseRepository[Module, ModuleCreate, ModuleUpdate]):
             "name": module.name,
             "code": module.code,
             "url": module.url,
+            "require_content": module.require_content,
+            "preview_url": module.preview_url,
             "branch": module.branch,
+            "session_id": module.session_id,
+            "workspace_path": module.workspace_path,
+            "container_id": module.container_id,
+            "is_active": module.is_active,
             "children": []
         }
 
