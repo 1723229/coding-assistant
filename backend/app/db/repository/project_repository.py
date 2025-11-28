@@ -26,13 +26,6 @@ class ProjectRepository(BaseRepository[Project, ProjectCreate, ProjectUpdate]):
         return await self.get_by_id(session, project_id)
 
     @async_with_session
-    async def get_project_by_session_id(self, session: AsyncSession, session_id: str) -> Optional[Project]:
-        """Get project by session_id"""
-        stmt = select(Project).where(Project.session_id == session_id)
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
-
-    @async_with_session
     async def get_project_by_code(self, session: AsyncSession, code: str) -> Optional[Project]:
         """Get project by code (case-insensitive)"""
         stmt = select(Project).where(Project.code == code.upper())
