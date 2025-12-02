@@ -31,11 +31,11 @@ database:
 # Claude Configuration
 claude:
   # API Settings
-  api_key: "sk-ww6QLSsRmcFO2mUQHFKqll35xJe4jCqwqDFqTShWIccudM2g"
-  base_url: "https://api.moonshot.cn/anthropic/"
+  api_key: "sk-e43189bfbcc24a01bab723f9ebb38e81"
+  base_url: "https://dashscope.aliyuncs.com/apps/anthropic"
 
   # Model selection
-  model: "claude-sonnet-4-5-20250929"
+  model: "qwen3-coder-plus"
 
   # Default tools for Claude Code
   default_tools:
