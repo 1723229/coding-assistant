@@ -29,12 +29,12 @@ class VersionRepository(BaseRepository[Version, VersionCreate, VersionUpdate]):
     async def get_version_by_code(
         self,
         session: AsyncSession,
-        project_id: int,
+        module_id: int,
         code: str
     ) -> Optional[Version]:
-        """Get version by project and version code"""
+        """Get version by module and version code"""
         stmt = select(Version).where(
-            Version.project_id == project_id,
+            Version.module_id == module_id,
             Version.code == code
         )
         result = await session.execute(stmt)
@@ -44,31 +44,31 @@ class VersionRepository(BaseRepository[Version, VersionCreate, VersionUpdate]):
     async def get_version_by_commit(
         self,
         session: AsyncSession,
-        project_id: int,
+        module_id: int,
         commit: str
     ) -> Optional[Version]:
-        """Get version by project and commit hash"""
+        """Get version by module and commit hash"""
         stmt = select(Version).where(
-            Version.project_id == project_id,
+            Version.module_id == module_id,
             Version.commit == commit.lower()
         )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
 
     @async_with_session
-    async def get_versions_by_project(
+    async def get_versions_by_module(
         self,
         session: AsyncSession,
-        project_id: int,
+        module_id: int,
         skip: int = 0,
         limit: int = 50
     ) -> List[Version]:
-        """Get all versions for a project"""
+        """Get all versions for a module"""
         return await self.get_multi(
             session,
             skip=skip,
             limit=limit,
-            filters={"project_id": project_id},
+            filters={"module_id": module_id},
             order_by="-create_time"
         )
 
@@ -102,19 +102,19 @@ class VersionRepository(BaseRepository[Version, VersionCreate, VersionUpdate]):
         return await self.delete(session, version_id)
 
     @async_with_session
-    async def count_versions(self, session: AsyncSession, project_id: int) -> int:
-        """Count versions for a project"""
-        return await self.count(session, filters={"project_id": project_id})
+    async def count_versions(self, session: AsyncSession, module_id: int) -> int:
+        """Count versions for a module"""
+        return await self.count(session, filters={"module_id": module_id})
 
     @async_with_session
     async def get_latest_version(
         self,
         session: AsyncSession,
-        project_id: int
+        module_id: int
     ) -> Optional[Version]:
-        """Get the most recent version for a project"""
+        """Get the most recent version for a module"""
         stmt = select(Version).where(
-            Version.project_id == project_id
+            Version.module_id == module_id
         ).order_by(Version.create_time.desc()).limit(1)
         result = await session.execute(stmt)
         return result.scalar_one_or_none()

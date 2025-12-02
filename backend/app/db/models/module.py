@@ -34,6 +34,7 @@ class Module(Base, BaseModel):
     url = Column(String(512), nullable=True, comment="可访问的链接（NODE类型与子节点共享）")
     require_content = Column(String(2000), nullable=True, comment="功能需求描述")
     preview_url = Column(String(512), nullable=True, comment="预览页面URL")
+    spec_file_path = Column(String(512), nullable=True, comment="spec_file_path")
 
     # POINT 类型的 session 和 workspace 管理字段
     session_id = Column(String(64), nullable=True, unique=True, index=True, comment="会话ID（仅POINT类型）")

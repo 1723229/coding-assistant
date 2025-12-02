@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 class VersionBase(BaseModel):
     """Version base schema"""
     code: str = Field(..., max_length=64, description="版本编号")
-    project_id: int = Field(..., description="所属项目ID")
+    module_id: int = Field(..., description="所属模块ID")
     msg: Optional[str] = Field(None, max_length=512, description="提交信息")
     commit: str = Field(..., max_length=64, description="Git commit ID")
 

@@ -7,6 +7,7 @@ POINT type modules create sessions and manage workspaces
 
 import uuid
 import logging
+import aiofiles
 from typing import Optional
 from pathlib import Path
 from fastapi import Query
@@ -14,11 +15,13 @@ from fastapi import Query
 from app.config.logging_config import log_print
 from app.config import get_settings
 from app.utils.model.response_model import BaseResponse, ListResponse
-from app.db.repository import ModuleRepository, ProjectRepository
-from app.db.schemas import ModuleCreate, ModuleUpdate, ModuleResponse
+from app.db.repository import ModuleRepository, ProjectRepository, VersionRepository, SessionRepository
+from app.db.schemas import ModuleCreate, ModuleUpdate, ModuleResponse, VersionCreate
 from app.db.models.module import ModuleType
 from app.core.docker_service import docker_service
 from app.core.github_service import GitHubService
+from app.core.claude_service import ClaudeService, MessageType
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -36,6 +39,220 @@ class ModuleService:
     def __init__(self):
         self.module_repo = ModuleRepository()
         self.project_repo = ProjectRepository()
+        self.version_repo = VersionRepository()
+        self.session_repo = SessionRepository()
+
+    async def _generate_spec_document(
+        self,
+        require_content: str,
+        module_name: str,
+        module_code: str,
+        workspace_path: str,
+        session_id: str
+    ) -> Optional[dict]:
+        """
+        使用 Claude 生成技术规格文档
+
+        Args:
+            require_content: 功能需求描述
+            module_name: 模块名称
+            module_code: 模块代码
+            workspace_path: 工作空间路径
+            session_id: 会话ID
+
+        Returns:
+            生成的规格文档路径，失败返回 None
+        """
+        try:
+            logger.info(f"Generating spec document for module: {module_code}")
+
+            # 创建 spec 目录
+            spec_dir = Path(workspace_path) / "spec"
+            spec_dir.mkdir(parents=True, exist_ok=True)
+
+            # 构建提示词
+            prompt = f"""你是一位资深的软件架构师和技术文档专家。请根据以下功能需求，生成一份详细的技术规格文档（Technical Specification Document）。
+
+项目信息：
+- 模块名称：{module_name}
+- 模块代码：{module_code}
+
+功能需求：
+{require_content}
+
+请生成一份完整的技术规格文档，文档应该包含以下内容：
+
+1. **功能概述**：简要描述该功能的目的和价值
+2. **功能详细描述**：详细说明功能的具体实现内容
+3. **技术架构**：描述技术选型、系统架构、模块划分
+4. **数据模型**：定义需要的数据表结构、字段说明
+5. **API接口设计**：列出所有需要的API接口，包括请求方法、路径、参数、返回值
+6. **前端页面设计**：描述需要的页面、组件、交互流程
+7. **业务流程**：用流程图或文字描述关键业务流程
+8. **非功能性需求**：性能要求、安全性、可用性等
+9. **实现步骤**：按照优先级列出开发步骤
+10. **测试用例**：列出关键测试场景和预期结果
+
+注意：
+- 文档应该足够详细，让AI能够根据文档直接生成代码
+- 使用Markdown格式
+- 代码示例使用代码块
+- 表格使用Markdown表格格式
+- 流程图使用Mermaid语法
+
+请直接输出Markdown格式的文档内容，不要有任何额外的解释或说明。"""
+
+            # 创建 ClaudeService 实例
+            claude_service = ClaudeService(
+                workspace_path=workspace_path,
+                session_id=session_id,
+                permission_mode="bypassPermissions"  # 使用自动批准模式
+            )
+
+            # 调用 Claude 生成文档
+            logger.info("Calling Claude to generate spec document...")
+            messages = await claude_service.chat(prompt=prompt, session_id=session_id)
+
+            # 提取文本内容
+            spec_content = ""
+            for msg in messages:
+                if msg.type == "text":
+                    spec_content += msg.content + "\n"
+
+            if not spec_content.strip():
+                logger.error("Claude did not generate any content")
+                return None
+
+            # print("Generated spec document:", spec_content)
+            # 保存到文件
+            spec_file_path = spec_dir / f"{module_code}_spec.md"
+            async with aiofiles.open(spec_file_path, "w", encoding="utf-8") as f:
+                await f.write(spec_content)
+
+            logger.info(f"Spec document saved to: {spec_file_path}")
+            return {"spec_file_path": spec_file_path, "spec_content": spec_content}
+
+        except Exception as e:
+            logger.error(f"Failed to generate spec document: {e}", exc_info=True)
+            return None
+
+    async def _generate_code_from_spec(
+        self,
+        spec_file_path: str,
+        workspace_path: str,
+        session_id: str,
+        module_name: str,
+        module_code: str
+    ) -> Optional[str]:
+        """
+        使用 Claude 根据规格文档生成代码并commit
+
+        Args:
+            spec_file_path: 规格文档路径
+            workspace_path: 工作空间路径
+            session_id: 会话ID
+            module_name: 模块名称
+            module_code: 模块代码
+
+        Returns:
+            commit_id，失败返回 None
+        """
+        try:
+            logger.info(f"Generating code from spec for module: {module_code}")
+
+            # 读取spec文档内容
+            async with aiofiles.open(spec_file_path, "r", encoding="utf-8") as f:
+                spec_content = await f.read()
+
+            # 构建提示词
+            prompt = f"""你是一位资深的全栈开发工程师。我已经为你准备了一份详细的技术规格文档，请根据这份文档和代码，生成完整的代码实现。
+
+模块信息：
+- 模块名称：{module_name}
+- 模块代码：{module_code}
+
+技术规格文档内容：
+{spec_content}
+
+请根据上述技术规格文档，完成以下任务：
+
+1. **仔细阅读工作空间中的现有代码**：使用Read工具查看当前项目结构和代码
+2. **分析技术栈**：了解项目使用的技术栈、框架和编码规范
+3. **生成代码**：根据规格文档，使用Write和Edit工具生成或修改代码文件
+4. **确保代码质量**：
+   - 遵循项目现有的代码风格和规范
+   - 添加必要的注释和文档
+   - 确保代码的可读性和可维护性
+   - 处理错误和边界情况
+5. **完整实现**：确保所有规格文档中描述的功能都已实现
+
+注意事项：
+- 不要只是生成示例代码，而是要生成可以直接运行的完整代码
+- 使用项目现有的目录结构和命名规范
+- 如果需要安装新的依赖，请更新相应的依赖配置文件
+- 生成的代码应该与现有代码无缝集成
+
+请开始实现代码，使用工具直接修改工作空间中的文件。"""
+
+            # 创建 ClaudeService 实例
+            claude_service = ClaudeService(
+                workspace_path=workspace_path,
+                session_id=session_id,
+                permission_mode="bypassPermissions"  # 使用自动批准模式
+            )
+
+            # 调用 Claude 生成代码（使用streaming）
+            logger.info("Calling Claude to generate code from spec...")
+
+            # 收集所有消息用于日志
+            all_messages = []
+            async for msg in claude_service.chat_stream(prompt=prompt, session_id=session_id):
+                all_messages.append(msg)
+                # 记录重要的消息类型
+                if msg.type in [MessageType.TOOL_USE.value, MessageType.ERROR.value]:
+                    logger.info(f"Claude message: {msg.type} - {msg.content[:200]}")
+
+            # 检查是否成功
+            has_error = any(msg.type == MessageType.ERROR.value for msg in all_messages)
+            if has_error:
+                logger.error("Claude encountered errors during code generation")
+                return None
+
+            logger.info("Code generation completed, now committing changes...")
+
+            # 使用 GitHubService 进行本地 commit
+            try:
+                github_service = GitHubService()
+
+                # Commit message
+                commit_message = f"[SpecCoding Auto Commit] - {module_name} ({module_code}) 功能实现"
+
+                # 执行commit
+                from git import Repo
+                repo = Repo(workspace_path)
+
+                # Add all changes
+                repo.git.add(A=True)
+
+                # Check if there are changes to commit
+                if repo.is_dirty() or repo.untracked_files:
+                    # Commit
+                    commit = repo.index.commit(commit_message)
+                    commit_id = commit.hexsha[:12]  # 使用前12位
+
+                    logger.info(f"Code committed successfully: {commit_id}")
+                    return commit_id
+                else:
+                    logger.warning("No changes to commit")
+                    return None
+
+            except Exception as e:
+                logger.error(f"Failed to commit code: {e}", exc_info=True)
+                return None
+
+        except Exception as e:
+            logger.error(f"Failed to generate code from spec: {e}", exc_info=True)
+            return None
 
     @log_print
     async def list_modules(
@@ -102,6 +319,7 @@ class ModuleService:
             # Check if module code already exists in this project
             existing = await self.module_repo.get_module_by_code(
                 project_id=data.project_id,
+                is_active = 1,
                 code=data.code
             )
             if existing:
@@ -128,6 +346,14 @@ class ModuleService:
                 session_id = str(uuid.uuid4())
                 workspace_path = str(settings.workspace_base_path / session_id)
 
+                await self.session_repo.create_session(
+                    session_id=session_id,
+                    name=project.code + '-' + data.code,
+                    workspace_path=workspace_path,
+                    github_repo_url=project.codebase,
+                    github_branch=data.branch or "main",
+                )
+
                 module_data.update({
                     "session_id": session_id,
                     "workspace_path": workspace_path,
@@ -137,32 +363,8 @@ class ModuleService:
 
                 logger.info(f"Module session_id: {session_id}, workspace: {workspace_path}")
 
-                # 2. Create module in database first
-                module = await self.module_repo.create_module(
-                    data=module_data,
-                    created_by=created_by
-                )
 
-                module_id = module.id
-                logger.info(f"Module created in database: {module_id}")
-
-                # 3. Create Docker container (optional, non-blocking)
-                try:
-                    logger.info(f"Creating Docker container for module: {module_id}")
-                    container_info = await docker_service.create_workspace(
-                        session_id=session_id,
-                        workspace_path=workspace_path
-                    )
-                    await self.module_repo.update_module(
-                        module_id=module_id,
-                        data={"container_id": container_info.id}
-                    )
-                    logger.info(f"Docker container created: {container_info.id}")
-                except Exception as e:
-                    logger.warning(f"Failed to create container for module {module_id}: {e}")
-                    # Continue even if container creation fails
-
-                # 4. Clone GitHub repository
+                # 2. Clone GitHub repository
                 if project.codebase:
                     try:
                         logger.info(f"Cloning repository: {project.codebase}")
@@ -173,22 +375,113 @@ class ModuleService:
                             branch=module_data.get("branch"),
                         )
                         logger.info(f"Repository cloned successfully to: {workspace_path}")
+                        await service.create_branch(repo_path=workspace_path, branch_name= project.code + '-' + data.code, session_id=session_id)
+                        logger.info(f"Branch created successfully to: {workspace_path}")
                     except Exception as e:
-                        logger.error(f"Failed to clone repo for module {module_id}: {e}")
                         # Mark module as inactive if clone fails
-                        await self.module_repo.update_module(
-                            module_id=module_id,
-                            data={"is_active": 0}
-                        )
                         return BaseResponse.error(
-                            message=f"模块创建成功，但代码拉取失败: {str(e)}"
+                            message=f"代码拉取失败: {str(e)}"
                         )
 
-                # 5. Refresh module data
+                # 3. Create module in database first
+                module = await self.module_repo.create_module(
+                    data=module_data,
+                    created_by=created_by
+                )
+                module_id = module.id
+                logger.info(f"Module created in database: {module_id}")
+
+                # 5. Generate spec document if require_content is provided
+                spec_file_path = None
+                commit_id = None
+
+                if data.require_content:
+                    try:
+                        logger.info(f"Generating spec document for module: {module_id}")
+                        spec_dict = await self._generate_spec_document(
+                            require_content=data.require_content,
+                            module_name=data.name,
+                            module_code=data.code,
+                            workspace_path=workspace_path,
+                            session_id=session_id
+                        )
+                        module_data.update({
+                            "spec_file_path": spec_dict["spec_file_path"],
+                        })
+                        await self.module_repo.update_module(module_id=module_id, data=module_data)
+                        if spec_dict["spec_file_path"]:
+                            logger.info(f"Spec document generated successfully: {spec_dict["spec_file_path"]}")
+
+                            # 6. Generate code from spec and commit
+                            logger.info(f"Generating code from spec for module: {module_id}")
+                            commit_id = await self._generate_code_from_spec(
+                                spec_file_path=spec_file_path,
+                                workspace_path=workspace_path,
+                                session_id=session_id,
+                                module_name=data.name,
+                                module_code=data.code
+                            )
+
+                            if commit_id:
+                                logger.info(f"Code generated and committed successfully: {commit_id}")
+
+                                # 7. Save commit to version table
+                                try:
+                                    # Generate version code based on timestamp
+                                    version_code = f"v{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                                    version_data = VersionCreate(
+                                        code=version_code,
+                                        module_id=module_id,
+                                        msg=f"{data.name} ({data.code}) 功能实现",
+                                        commit=commit_id
+                                    )
+                                    version = await self.version_repo.create_version(
+                                        data=version_data,
+                                        created_by=created_by
+                                    )
+                                    logger.info(f"Version created: {version.id}, code: {version_code}")
+                                except Exception as e:
+                                    logger.error(f"Failed to create version record: {e}", exc_info=True)
+                            else:
+                                logger.warning("Code generation did not produce a commit")
+                        else:
+                            logger.warning("Spec document generation returned None")
+                    except Exception as e:
+                        logger.error(f"Failed in spec/code generation process: {e}", exc_info=True)
+                        await self.module_repo.delete_module(module_id=module_id)
+                        return BaseResponse.error(message=f"创建模块失败: {str(e)}")
+                        # Continue even if spec/code generation fails
+
+                # 8. Refresh module data and add commit_id
                 module = await self.module_repo.get_module_by_id(module_id=module_id)
+                module.spec_content = spec_dict.get("spec_content")
+                response_data = ModuleResponse.model_validate(module)
+
+                # Add latest_commit_id to response
+                if commit_id:
+                    response_data.latest_commit_id = commit_id
+
+                # todo Create Docker container (optional, non-blocking)
+                try:
+                    container_info = await docker_service.create_workspace(
+                        session_id=session_id,
+                        workspace_path=workspace_path
+                    )
+                    logger.info(f"Docker container created: {container_info.id}")
+                    module_data.update({
+                        "container_id": container_info.id,
+                    })
+                    await self.module_repo.update_module(module_id=module_id, data=module_data)
+                except Exception as e:
+                    logger.warning(f"Failed to create container for module {module_id}: {e}")
+                    await self.module_repo.delete_module(module_id=module_id)
+                    return BaseResponse.error(message=f"创建模块失败: {str(e)}")
+
+                    # Continue even if container creation fails
+
                 return BaseResponse.success(
-                    data=ModuleResponse.model_validate(module),
-                    message="POINT 模块创建成功，代码已拉取"
+                    data=response_data,
+                    message="POINT 模块创建成功，代码已拉取并生成"
                 )
 
             else:
@@ -257,6 +550,7 @@ class ModuleService:
             if data.code and data.code != existing.code:
                 duplicate = await self.module_repo.get_module_by_code(
                     project_id=existing.project_id,
+                    is_active = 1,
                     code=data.code
                 )
                 if duplicate:

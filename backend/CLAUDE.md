@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a FastAPI-based web platform that provides a web interface for Claude Code. It enables multi-turn conversations with Claude SDK, session management, workspace isolation, and GitHub integration. The backend serves as a bridge between a web frontend and the Claude Agent SDK.
+This is a FastAPI-based web platform that provides a web interface for Claude Code. It enables multi-turn conversations with Claude SDK, session management, workspace isolation, GitHub integration, and project/module/version management. The backend serves as a bridge between a web frontend and the Claude Agent SDK.
 
 ## Development Commands
 

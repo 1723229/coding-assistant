@@ -30,11 +30,13 @@ class ModuleRepository(BaseRepository[Module, ModuleCreate, ModuleUpdate]):
         self,
         session: AsyncSession,
         project_id: int,
+        is_active: int,
         code: str
     ) -> Optional[Module]:
         """Get module by project_id and code (unique constraint)"""
         stmt = select(Module).where(
             Module.project_id == project_id,
+            Module.is_active == is_active,
             Module.code == code
         )
         result = await session.execute(stmt)

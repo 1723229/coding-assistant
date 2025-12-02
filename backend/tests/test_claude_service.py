@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from dataclasses import dataclass
 
 # Import service classes
-from app.service.claude_service import (
+from app.core.claude_service import (
     ClaudeService,
     SessionClaudeManager,
     ChatMessage,
@@ -121,7 +121,7 @@ class TestClaudeService:
     @pytest.mark.asyncio
     async def test_connect_creates_client(self):
         """Test that connect creates a client."""
-        with patch('app.service.claude_service.ClaudeSDKClient') as mock_client_class:
+        with patch('app.core.claude_service.ClaudeSDKClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.connect = AsyncMock()
             mock_client_class.return_value = mock_client
@@ -158,7 +158,7 @@ class TestClaudeService:
         
         service = ClaudeService()
         
-        with patch('app.service.claude_service.isinstance') as mock_isinstance:
+        with patch('app.core.claude_service.isinstance') as mock_isinstance:
             # Setup isinstance checks
             def isinstance_side_effect(obj, cls):
                 if cls.__name__ == 'AssistantMessage':

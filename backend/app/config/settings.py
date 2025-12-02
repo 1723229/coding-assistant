@@ -162,6 +162,8 @@ class ClaudeConfig:
             os.environ["ANTHROPIC_API_KEY"] = cls.API_KEY
         if cls.BASE_URL:
             os.environ["ANTHROPIC_BASE_URL"] = cls.BASE_URL
+        print("Anthropic API key:", os.environ["ANTHROPIC_API_KEY"])
+        print("Base URL:", os.environ["ANTHROPIC_BASE_URL"])
 
 
 # ============================================================================
