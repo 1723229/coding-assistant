@@ -41,6 +41,7 @@ class Module(Base, BaseModel):
     workspace_path = Column(String(512), nullable=True, comment="工作空间路径（仅POINT类型）")
     container_id = Column(String(128), nullable=True, comment="Docker容器ID（仅POINT类型）")
     branch = Column(String(128), nullable=True, comment="Git分支（仅POINT类型）")
+    latest_commit_id = Column(String(64), nullable=True, comment="最新commit ID（仅POINT类型）")
     is_active = Column(BigInteger, nullable=False, default=1, comment="是否激活")
 
     # Relationships

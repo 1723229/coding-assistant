@@ -40,7 +40,8 @@ class ModuleUpdate(BaseModel):
     require_content: Optional[str] = Field(None, max_length=2000, description="功能需求描述")
     # preview_url: Optional[str] = Field(None, max_length=512, description="预览页面，前端不操作")
     branch: Optional[str] = Field(None, max_length=128, description="Git分支（仅POINT类型）")
-    container_id: Optional[str]=Field(None, max_length=512, description="容器id")
+    container_id: Optional[str] = Field(None, max_length=512, description="容器id")
+    latest_commit_id: Optional[str] = Field(None, max_length=64, description="最新commit ID（仅POINT类型）")
 
 
 class ModuleResponse(ModuleBase):
@@ -56,6 +57,8 @@ class ModuleResponse(ModuleBase):
     update_time: Optional[datetime] = None
     create_by: Optional[str] = None
     update_by: Optional[str] = None
+    spec_content: Optional[str] = None
+    spec_file_content: Optional[str] = None
 
     class Config:
         from_attributes = True

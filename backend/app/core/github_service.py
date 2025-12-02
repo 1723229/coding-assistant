@@ -801,16 +801,83 @@ class GitHubService:
     @git_operation("get_current_branch")
     async def get_current_branch(self, repo_path: str) -> str:
         """Get the current branch name.
-        
+
         Args:
             repo_path: Path to local repository
-            
+
         Returns:
             Current branch name
         """
         repo = Repo(repo_path)
         return repo.active_branch.name
-    
+
+    @git_operation("get_commit_changes")
+    async def get_commit_changes(
+        self,
+        repo_path: str,
+        commit_id: str,
+        include_diff: bool = False
+    ) -> list[FileChange]:
+        """Get list of files changed in a specific commit.
+
+        Args:
+            repo_path: Path to local repository
+            commit_id: Commit SHA or reference
+            include_diff: Whether to include diff content for each file
+
+        Returns:
+            List of FileChange objects
+        """
+        repo = Repo(repo_path)
+
+        # Get the commit object
+        commit = repo.commit(commit_id)
+
+        # Get parent commit (for diff comparison)
+        # If no parent (initial commit), compare with empty tree
+        if commit.parents:
+            parent = commit.parents[0]
+            diffs = parent.diff(commit)
+        else:
+            # Initial commit - compare with empty tree
+            diffs = commit.diff(None)
+
+        changes = []
+        for diff in diffs:
+            path = diff.b_path or diff.a_path
+
+            # Determine change type
+            if diff.new_file:
+                status = "added"
+            elif diff.deleted_file:
+                status = "deleted"
+            elif diff.renamed_file:
+                status = "renamed"
+            else:
+                status = "modified"
+
+            # Get diff content if requested
+            diff_content = None
+            if include_diff:
+                try:
+                    diff_content = diff.diff.decode('utf-8', errors='replace')
+                except:
+                    # Fallback to git command
+                    try:
+                        diff_content = repo.git.show(f"{commit_id}:{path}")
+                    except:
+                        pass
+
+            changes.append(FileChange(
+                path=path,
+                status=status,
+                additions=diff.insertions if hasattr(diff, 'insertions') else 0,
+                deletions=diff.deletions if hasattr(diff, 'deletions') else 0,
+                diff=diff_content,
+            ))
+
+        return changes
+
     @git_operation("get_remote_url")
     async def get_remote_url(self, repo_path: str, remote: str = "origin") -> str:
         """Get the remote URL for a repository.

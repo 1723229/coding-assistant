@@ -346,14 +346,6 @@ class ModuleService:
                 session_id = str(uuid.uuid4())
                 workspace_path = str(settings.workspace_base_path / session_id)
 
-                await self.session_repo.create_session(
-                    session_id=session_id,
-                    name=project.code + '-' + data.code,
-                    workspace_path=workspace_path,
-                    github_repo_url=project.codebase,
-                    github_branch=data.branch or "main",
-                )
-
                 module_data.update({
                     "session_id": session_id,
                     "workspace_path": workspace_path,
@@ -388,11 +380,17 @@ class ModuleService:
                     data=module_data,
                     created_by=created_by
                 )
+                await self.session_repo.create_session(
+                    session_id=session_id,
+                    name=project.code + '-' + data.code,
+                    workspace_path=workspace_path,
+                    github_repo_url=project.codebase,
+                    github_branch=data.branch or "main",
+                )
                 module_id = module.id
                 logger.info(f"Module created in database: {module_id}")
 
                 # 5. Generate spec document if require_content is provided
-                spec_file_path = None
                 commit_id = None
 
                 if data.require_content:
@@ -409,43 +407,43 @@ class ModuleService:
                             "spec_file_path": spec_dict["spec_file_path"],
                         })
                         await self.module_repo.update_module(module_id=module_id, data=module_data)
-                        if spec_dict["spec_file_path"]:
-                            logger.info(f"Spec document generated successfully: {spec_dict["spec_file_path"]}")
-
-                            # 6. Generate code from spec and commit
-                            logger.info(f"Generating code from spec for module: {module_id}")
-                            commit_id = await self._generate_code_from_spec(
-                                spec_file_path=spec_file_path,
-                                workspace_path=workspace_path,
-                                session_id=session_id,
-                                module_name=data.name,
-                                module_code=data.code
-                            )
-
-                            if commit_id:
-                                logger.info(f"Code generated and committed successfully: {commit_id}")
-
-                                # 7. Save commit to version table
-                                try:
-                                    # Generate version code based on timestamp
-                                    version_code = f"v{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                                    version_data = VersionCreate(
-                                        code=version_code,
-                                        module_id=module_id,
-                                        msg=f"{data.name} ({data.code}) 功能实现",
-                                        commit=commit_id
-                                    )
-                                    version = await self.version_repo.create_version(
-                                        data=version_data,
-                                        created_by=created_by
-                                    )
-                                    logger.info(f"Version created: {version.id}, code: {version_code}")
-                                except Exception as e:
-                                    logger.error(f"Failed to create version record: {e}", exc_info=True)
-                            else:
-                                logger.warning("Code generation did not produce a commit")
-                        else:
-                            logger.warning("Spec document generation returned None")
+                        # if spec_dict["spec_file_path"]:
+                        #     logger.info(f"Spec document generated successfully: {spec_dict["spec_file_path"]}")
+                        #
+                        #     # 6. Generate code from spec and commit
+                        #     logger.info(f"Generating code from spec for module: {module_id}")
+                        #     commit_id = await self._generate_code_from_spec(
+                        #         spec_file_path=spec_file_path,
+                        #         workspace_path=workspace_path,
+                        #         session_id=session_id,
+                        #         module_name=data.name,
+                        #         module_code=data.code
+                        #     )
+                        #
+                        #     if commit_id:
+                        #         logger.info(f"Code generated and committed successfully: {commit_id}")
+                        #
+                        #         # 7. Save commit to version table
+                        #         try:
+                        #             # Generate version code based on timestamp
+                        #             version_code = f"v{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                        #             version_data = VersionCreate(
+                        #                 code=version_code,
+                        #                 module_id=module_id,
+                        #                 msg=f"{data.name} ({data.code}) 功能实现",
+                        #                 commit=commit_id
+                        #             )
+                        #             version = await self.version_repo.create_version(
+                        #                 data=version_data,
+                        #                 created_by=created_by
+                        #             )
+                        #             logger.info(f"Version created: {version.id}, code: {version_code}")
+                        #         except Exception as e:
+                        #             logger.error(f"Failed to create version record: {e}", exc_info=True)
+                        #     else:
+                        #         logger.warning("Code generation did not produce a commit")
+                        # else:
+                        #     logger.warning("Spec document generation returned None")
                     except Exception as e:
                         logger.error(f"Failed in spec/code generation process: {e}", exc_info=True)
                         await self.module_repo.delete_module(module_id=module_id)
@@ -454,6 +452,7 @@ class ModuleService:
 
                 # 8. Refresh module data and add commit_id
                 module = await self.module_repo.get_module_by_id(module_id=module_id)
+                module.spec_file_path = spec_dict.get("spec_file_path")
                 module.spec_content = spec_dict.get("spec_content")
                 response_data = ModuleResponse.model_validate(module)
 

@@ -125,7 +125,7 @@ async def get_local_changes(
     """获取本地变更"""
     return await github_service.get_local_changes(
         session_id=session_id,
-        include_diff=include_diff,
+        include_diff=include_diff
     )
 
 
@@ -143,6 +143,22 @@ async def get_file_diff(
         session_id=session_id,
         file_path=file_path,
     )
+
+@github_router.get(
+    "/diff",
+    summary="获取文件差异",
+    operation_id="get_commit_file_diff"
+)
+async def get_commit_file_diff(
+    repo_path: str = Query(..., description="repo path"),
+    commit_id: str = Query(..., description="Commit ID")
+):
+    """获取文件差异"""
+    return await github_service.get_commit_file_diff(
+        repo_path=repo_path,
+        commit_id=commit_id
+    )
+
 
 
 @github_router.post(

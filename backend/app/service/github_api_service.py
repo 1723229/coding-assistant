@@ -119,6 +119,22 @@ class GitHubApiService:
             return BaseResponse.business_error(message=f"GitHub API错误: {str(e)}")
         except Exception as e:
             return BaseResponse.error(message=f"获取仓库列表失败: {str(e)}")
+
+    @log_print
+    async def get_commit_file_diff(
+            self,
+            repo_path:  Optional[str] = Query(None, description="Search query"),
+            commit_id:  Optional[str] = Query(None, description="Search query")
+    ):
+        """获取用户的GitHub仓库列表"""
+        try:
+            service = await self._get_github_service()
+            items = await service.get_commit_changes(repo_path=repo_path, commit_id=commit_id)
+            return ListResponse.success(items=items, total=len(items))
+        except GitHubAPIError as e:
+            return BaseResponse.business_error(message=f"GitHub API错误: {str(e)}")
+        except Exception as e:
+            return BaseResponse.error(message=f"获取仓库列表失败: {str(e)}")
     
     @log_print
     async def get_repo_info(self, repo_url: str):
