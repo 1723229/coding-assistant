@@ -15,7 +15,7 @@ class ProjectBase(BaseModel):
     name: str = Field(..., max_length=255, description="项目名称")
     codebase: str = Field(..., max_length=512, description="Git仓库地址")
     token: str = Field(..., max_length=512, description="Git认证令牌")
-    owner: int = Field(..., description="持有者ID")
+    owner: str = Field(..., description="持有者ID")
 
     @field_validator("code")
     @classmethod
@@ -37,7 +37,7 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255, description="项目名称")
     codebase: Optional[str] = Field(None, max_length=512, description="Git仓库地址")
     token: Optional[str] = Field(None, max_length=512, description="Git认证令牌")
-    owner: Optional[int] = Field(None, description="持有者ID")
+    owner: Optional[str] = Field(None, description="持有者ID")
 
     @field_validator("code")
     @classmethod

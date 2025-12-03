@@ -22,7 +22,7 @@ class Project(Base, BaseModel):
     name = Column(String(255), nullable=False, comment="项目名称")
     codebase = Column(String(512), nullable=False, comment="Git仓库地址")
     token = Column(String(512), nullable=False, comment="Git认证令牌")
-    owner = Column(BigInteger, nullable=False, comment="持有者ID")
+    owner = Column(String(512), nullable=False, comment="持有者ID")
 
     # Indexes
     __table_args__ = (

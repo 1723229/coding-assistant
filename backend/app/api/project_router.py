@@ -24,7 +24,7 @@ project_service = ProjectService()
 async def list_projects(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(50, ge=1, le=100, description="Maximum number of records"),
-    owner: int = Query(None, description="Filter by owner ID"),
+    owner: str = Query(None, description="Filter by owner ID"),
 ):
     """获取项目列表（分页，可按所有者筛选）"""
     return await project_service.list_projects(skip=skip, limit=limit, owner=owner)
