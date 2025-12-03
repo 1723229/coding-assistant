@@ -166,6 +166,8 @@ class ModuleRepository(BaseRepository[Module, ModuleCreate, ModuleUpdate]):
             "container_id": module.container_id,
             "latest_commit_id": module.latest_commit_id,
             "is_active": module.is_active,
+            "url_id": module.url_id,
+            "spec_content": module.spec_content,
             "children": []
         }
 

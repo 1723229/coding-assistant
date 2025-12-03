@@ -5,6 +5,7 @@ Module Model
 """
 
 from sqlalchemy import Column, BigInteger, String, ForeignKey, Index, Enum as SQLEnum
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import relationship
 import enum
 
@@ -35,6 +36,7 @@ class Module(Base, BaseModel):
     require_content = Column(String(2000), nullable=True, comment="功能需求描述")
     preview_url = Column(String(512), nullable=True, comment="预览页面URL")
     spec_file_path = Column(String(512), nullable=True, comment="spec_file_path")
+    spec_content = Column(LONGTEXT, nullable=True, comment="spec_content")
     url_id = Column(BigInteger, nullable=True, comment="url节点ID")
 
     # POINT 类型的 session 和 workspace 管理字段

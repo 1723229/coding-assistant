@@ -6,6 +6,7 @@ Module API Router
 """
 
 from fastapi import APIRouter, Query, Path
+from fastapi.responses import StreamingResponse
 from app.service.module_service import ModuleService
 from app.db.schemas import ModuleCreate, ModuleUpdate
 
@@ -55,6 +56,74 @@ async def create_module(data: ModuleCreate):
     - POINT 类型：创建 session，拉取代码到 workspace
     """
     return await module_service.create_module(data)
+
+
+@module_router.post(
+    "/stream",
+    summary="创建新模块（流式）",
+    operation_id="create_module_stream"
+)
+async def create_module_stream(data: ModuleCreate):
+    """
+    创建新模块（SSE流式）
+
+    实时返回创建进度，用于POINT类型模块的长时间操作
+
+    事件类型：
+    - connected: 连接建立
+    - step: 步骤进度更新
+    - error: 错误信息
+    - complete: 创建完成
+    """
+    return StreamingResponse(
+        module_service.create_module_stream(data),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+@module_router.post(
+    "/optimize/{session_id}/stream",
+    summary="优化模块代码（流式）",
+    operation_id="optimize_module_stream"
+)
+async def optimize_module_stream(
+    session_id: str = Path(..., description="Session ID"),
+    optimization_request: dict = None
+):
+    """
+    优化已创建的POINT类型模块（SSE流式）
+
+    根据用户新的需求对现有代码进行优化，实时返回优化进度
+
+    请求体:
+    {
+        "content": "优化需求描述",
+        "updated_by": "用户标识"
+    }
+
+    事件类型：
+    - connected: 连接建立
+    - step: 步骤进度更新
+    - error: 错误信息
+    - complete: 优化完成
+    """
+    content = optimization_request.get("content") if optimization_request else ""
+    updated_by = optimization_request.get("updated_by") if optimization_request else None
+
+    return StreamingResponse(
+        module_service.optimize_module_stream(session_id, content, updated_by),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
 
 
 @module_router.get(

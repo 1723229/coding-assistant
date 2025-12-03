@@ -44,6 +44,7 @@ class ModuleUpdate(BaseModel):
     container_id: Optional[str] = Field(None, max_length=512, description="容器id")
     latest_commit_id: Optional[str] = Field(None, max_length=64, description="最新commit ID（仅POINT类型）")
     url_parent_id: Optional[int] = Field(None, description="url父节点ID")
+    spec_content: Optional[str] = Field(None, description="spec内容")
 
     model_config = ConfigDict(extra='allow')
 
