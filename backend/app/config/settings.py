@@ -76,7 +76,7 @@ class DatabaseConfig:
     def get_database_url(cls) -> str:
         """
         Build MySQL database connection URL
-        
+
         Returns:
             Complete database connection URL
         """
@@ -86,7 +86,7 @@ class DatabaseConfig:
     def get_async_database_url(cls) -> str:
         """
         Build async MySQL database connection URL
-        
+
         Returns:
             Complete async database connection URL
         """

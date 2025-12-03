@@ -164,6 +164,7 @@ class ModuleRepository(BaseRepository[Module, ModuleCreate, ModuleUpdate]):
             "session_id": module.session_id,
             "workspace_path": module.workspace_path,
             "container_id": module.container_id,
+            "latest_commit_id": module.latest_commit_id,
             "is_active": module.is_active,
             "children": []
         }

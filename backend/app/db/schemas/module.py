@@ -6,7 +6,7 @@ Pydantic models for Module validation and serialization
 
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from app.db.models.module import ModuleType
 
 
@@ -27,6 +27,7 @@ class ModuleBase(BaseModel):
 
 class ModuleCreate(ModuleBase):
     """Schema for creating a module"""
+    url_parent_id: Optional[int] = Field(None, description="url父节点ID")
     pass
 
 
@@ -42,6 +43,9 @@ class ModuleUpdate(BaseModel):
     branch: Optional[str] = Field(None, max_length=128, description="Git分支（仅POINT类型）")
     container_id: Optional[str] = Field(None, max_length=512, description="容器id")
     latest_commit_id: Optional[str] = Field(None, max_length=64, description="最新commit ID（仅POINT类型）")
+    url_parent_id: Optional[int] = Field(None, description="url父节点ID")
+
+    model_config = ConfigDict(extra='allow')
 
 
 class ModuleResponse(ModuleBase):
@@ -58,7 +62,8 @@ class ModuleResponse(ModuleBase):
     create_by: Optional[str] = None
     update_by: Optional[str] = None
     spec_content: Optional[str] = None
-    spec_file_content: Optional[str] = None
+    spec_file_content: Optional[str] = None,
+    url_id: Optional[int] = None
 
     class Config:
         from_attributes = True
