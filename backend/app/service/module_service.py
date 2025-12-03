@@ -16,7 +16,8 @@ from fastapi import Query
 from app.config.logging_config import log_print
 from app.config import get_settings
 from app.utils.model.response_model import BaseResponse, ListResponse
-from app.db.repository import ModuleRepository, ProjectRepository, VersionRepository, SessionRepository
+from app.db.repository import ModuleRepository, ProjectRepository, VersionRepository, SessionRepository, \
+    MessageRepository
 from app.db.schemas import ModuleCreate, ModuleUpdate, ModuleResponse, VersionCreate
 from app.db.models.module import ModuleType
 from app.core.docker_service import docker_service
@@ -28,6 +29,7 @@ from app.utils.prompt.prompt_build import generate_code_from_spec
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+message_repo = MessageRepository()
 
 
 class ModuleService:
@@ -856,10 +858,15 @@ class ModuleService:
 
             try:
                 # 从message表加载历史消息
-                from app.db.repository.message_repository import MessageRepository
-                message_repo = MessageRepository()
-                await message_repo.create(session_id=session_id, content=content)
-                messages = await message_repo.get_messages_by_session(session_id=session_id, limit=50)
+                await message_repo.create_message(
+                    session_id=session_id,
+                    role='user',
+                    content=content,
+                    tool_name=None,
+                    tool_input=None,
+                    tool_result=None,
+                )
+                messages = await message_repo.get_session_messages(session_id=session_id, limit=50)
 
                 # 构建对话历史上下文
                 conversation_context = "\\n\\n".join([
@@ -946,7 +953,8 @@ class ModuleService:
 
             try:
                 module.latest_commit_id = commit_id
-                module_update = ModuleUpdate(latest_commit_id=commit_id, spec_content=module.spec_content)
+                module_update = ModuleUpdate(latest_commit_id=commit_id, spec_content=updated_spec)
+                logger.debug(f"Module update: {module_update}")
                 await self.module_repo.update_module(
                     module_id=module.id,
                     data=module_update
