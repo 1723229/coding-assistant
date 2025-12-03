@@ -379,7 +379,7 @@ async def chat_stream_with_auto_commit_generator(
                 yield f"data: {json.dumps(msg_dict)}\n\n"
 
                 # 收集文本用于保存
-                if chat_msg.type in ("text", "text_delta"):
+                if chat_msg.type == "text":
                     full_response.append(chat_msg.content)
 
                 # 小延迟防止刷屏
