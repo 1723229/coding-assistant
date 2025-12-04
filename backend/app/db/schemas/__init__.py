@@ -32,6 +32,22 @@ from .workspace import (
     FileWriteRequest,
     WriteFileRequest,
 )
+from .project import (
+    ProjectCreate,
+    ProjectUpdate,
+    ProjectResponse,
+)
+from .module import (
+    ModuleCreate,
+    ModuleUpdate,
+    ModuleResponse,
+    ModuleTreeResponse,
+)
+from .version import (
+    VersionCreate,
+    VersionUpdate,
+    VersionResponse,
+)
 
 __all__ = [
     # Session
@@ -58,6 +74,19 @@ __all__ = [
     "FileContent",
     "FileWriteRequest",
     "WriteFileRequest",
+    # Project
+    "ProjectCreate",
+    "ProjectUpdate",
+    "ProjectResponse",
+    # Module
+    "ModuleCreate",
+    "ModuleUpdate",
+    "ModuleResponse",
+    "ModuleTreeResponse",
+    # Version
+    "VersionCreate",
+    "VersionUpdate",
+    "VersionResponse",
 ]
 
 

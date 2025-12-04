@@ -13,7 +13,7 @@ from fastapi import Query
 from app.config import get_settings
 from app.config.logging_config import log_print
 from app.utils.model.response_model import BaseResponse, ListResponse
-from app.db.repository import SessionRepository
+from app.db.repository import SessionRepository, ModuleRepository
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

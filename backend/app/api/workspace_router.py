@@ -33,7 +33,6 @@ async def list_files(
     """列出工作空间目录下的文件"""
     return await workspace_service.list_files(session_id=session_id, path=path)
 
-
 @workspace_router.get(
     "/{session_id}/file",
     summary="读取文件",
@@ -45,6 +44,7 @@ async def read_file(
 ):
     """读取工作空间中的文件内容"""
     return await workspace_service.read_file(session_id=session_id, path=path)
+
 
 
 @workspace_router.put(

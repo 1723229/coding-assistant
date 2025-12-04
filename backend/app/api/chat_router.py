@@ -9,14 +9,20 @@ import asyncio
 import json
 import logging
 from typing import Optional, Dict, AsyncGenerator
+from pathlib import Path as _Path
+from datetime import datetime
 
 from app.config import get_settings
-from app.core.claude_service import ClaudeService, ChatMessage, session_claude_manager
-from app.db.repository import SessionRepository, MessageRepository
+from app.core.claude_service import ChatMessage, session_claude_manager
+from app.core.github_service import GitHubService
+from app.db.repository import SessionRepository, MessageRepository, ModuleRepository, VersionRepository
+from app.db.schemas.version import VersionCreate
 from app.service.chat_service import ChatService
 from fastapi import APIRouter, Query, Body, Path
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from app.utils.prompt.prompt_build import generate_code_from_spec
+from app.utils.model.response_model import BaseResponse
 
 # 创建路由器
 chat_router = APIRouter(prefix="/chat", tags=["chat"])
@@ -27,6 +33,8 @@ logger = logging.getLogger(__name__)
 # Repository和Service实例
 session_repo = SessionRepository()
 message_repo = MessageRepository()
+module_repo = ModuleRepository()
+version_repo = VersionRepository()
 chat_service = ChatService()
 
 
@@ -37,6 +45,11 @@ chat_service = ChatService()
 class ChatRequest(BaseModel):
     """聊天请求模型"""
     content: str
+
+
+class SpecGenerationRequest(BaseModel):
+    """Spec文档生成请求模型"""
+    content: str = Field(..., description="功能需求描述")
 
 
 # ===================
@@ -178,7 +191,7 @@ async def chat_stream_generator(
     operation_id="chat_stream"
 )
 async def chat_stream(
-        session_id: str = Path(..., description="Session ID"),
+        session_id: str = Path(description="Session ID"),
         request: ChatRequest = Body(...),
 ):
     """
@@ -272,3 +285,177 @@ async def get_session_stats(session_id: str):
 async def get_all_stats():
     """获取所有会话的统计信息"""
     return await chat_service.get_all_stats()
+
+
+@chat_router.post(
+    "/auto-commit/{session_id}",
+    summary="根据spec.md生成代码",
+    operation_id="chat_stream_auto_commit"
+)
+async def chat_stream_auto_commit(
+        session_id: str = Path(..., description="Session ID"),
+        request: ChatRequest = Body(...),
+):
+    """
+    根据md生成代码（带自动commit功能）
+
+    该端点会在Claude对workspace进行修改后：
+    1. 自动检测代码变更
+    2. 自动创建Git commit
+    3. 根据session_id找到关联的module
+    4. 创建新的version记录
+    5. 更新module的latest_commit_id
+    """
+    # 获取会话信息
+    try:
+        session = await session_repo.get_session_by_id(session_id)
+        module = await module_repo.get_module_by_session_id(session_id=session_id)
+        if not session:
+            return {"error": "Session not found"}
+        if not module:
+            return {"error": "Module not found"}
+
+        workspace_path = session.workspace_path
+        logger.info(f"[SSE Auto-Commit] Starting chat for session: {session.name}")
+        commit_id = await generate_code_from_spec(
+            spec_content=request.content,
+            session_id=session_id,
+            workspace_path=workspace_path,
+            module_name=module.name,
+            module_code=module.code,
+        )
+        if commit_id:
+            logger.info(f"[SSE Auto-Commit] Commit ID: {commit_id}")
+            # 根据session_id查找module
+            module = await module_repo.get_module_by_session_id(session_id=session_id)
+
+            if module:
+                logger.info(f"[Auto Commit] Found module: {module.id} (code: {module.code})")
+
+                # 获取最新版本号，生成新版本号
+                latest_version = await version_repo.get_latest_version(module_id=module.id)
+                if latest_version:
+                    # 解析版本号并递增
+                    try:
+                        version_parts = latest_version.code.split('.')
+                        if len(version_parts) >= 3:
+                            patch = int(version_parts[2]) + 1
+                            new_version_code = f"{version_parts[0]}.{version_parts[1]}.{patch}"
+                        else:
+                            new_version_code = f"v1.0.{int(latest_version.code.split('.')[-1]) + 1}"
+                    except:
+                        # 如果解析失败，使用时间戳
+                        new_version_code = f"v1.0.{int(datetime.now().timestamp())}"
+                else:
+                    # 如果是第一个版本
+                    new_version_code = "v1.0.0"
+                commit_message = f"[SpecCoding Auto Commit] - {module.name} ({module.code})-{new_version_code} 功能实现"
+                # 创建新的version记录
+                version_data = VersionCreate(
+                    code=new_version_code,
+                    module_id=module.id,
+                    msg=commit_message,
+                    commit=commit_id
+                )
+
+                new_version = await version_repo.create_version(
+                    data=version_data
+                )
+                logger.info(f"[Auto Commit] Created version: {new_version_code} (ID: {new_version.id})")
+
+                # 更新module的latest_commit_id
+                from app.db.schemas.module import ModuleUpdate
+                module_update = ModuleUpdate(latest_commit_id=commit_id)
+                await module_repo.update_module(
+                    module_id=module.id,
+                    data=module_update,
+                )
+
+                logger.info(f"[Auto Commit] Updated module latest_commit_id: {commit_id}")
+                # 返回结果
+                return BaseResponse.success(data=json.dumps({'type': 'success', 'content': 'Successfully updated module version tracking'}))
+    except Exception as e:
+        logger.error(f"[Auto-Commit] Database error: {e}")
+        return BaseResponse.error(message=f"生成开发文档失败: {str(e)}")
+
+
+@chat_router.post(
+    "/generate-spec/{session_id}",
+    summary="生成开发文档",
+    operation_id="generate_spec_document"
+)
+async def generate_spec_document(
+        session_id: str = Path(..., description="Session ID"),
+        request: SpecGenerationRequest = Body(...),
+):
+    """
+    生成完整的开发文档（spec.md）
+    """
+    try:
+        # 获取会话信息
+        session = await session_repo.get_session_by_id(session_id)
+        if not session:
+            from app.utils.model.response_model import BaseResponse
+            return BaseResponse.not_found(message=f"会话 '{session_id}' 不存在")
+
+        workspace_path = session.workspace_path or "/tmp"
+        logger.info(f"[Spec Generation] Starting for session: {session.name}")
+
+        # 构造专业的提示词
+        spec_prompt = f"""你是一位专业的软件架构师和技术文档撰写专家。请根据以下需求描述，生成一份完整、规范的开发文档（spec.md）。
+
+# 用户需求描述
+{request.content}
+
+# 文档要求
+请生成一份完整的开发文档，返回md格式文本
+
+# 输出要求
+1. 使用标准的Markdown格式
+2. 使用清晰的层级结构（# ## ### 等）
+3. 对于架构图和流程图，使用Mermaid语法
+4. 内容要详细、专业、可执行
+5. 避免模糊和不确定的描述
+6. 直接输出完整的Markdown文档，不要有任何的解释或前言
+
+请开始生成开发文档："""
+
+        # 创建Claude服务（使用一个临时的session_id来避免干扰正常对话）
+        spec_generation_session_id = f"{session_id}_spec_gen"
+        claude_service = await session_claude_manager.get_service(
+            session_id=spec_generation_session_id,
+            workspace_path=workspace_path,
+        )
+
+        # 调用非流式chat方法获取完整响应
+        logger.info("[Spec Generation] Sending request to Claude...")
+        spec_content = ""
+        async for chat_msg in claude_service.chat_stream(
+                spec_prompt,
+                session_id=session_id,
+        ):
+            # 收集文本用于保存
+            if chat_msg.type == "text":
+                spec_content += chat_msg.content + "\n"
+
+        # 清理临时session
+        await session_claude_manager.close_session(spec_generation_session_id)
+
+        logger.info(f"[Spec Generation] Generated document length: {len(spec_content)} characters")
+
+        # 返回结果
+        from app.utils.model.response_model import BaseResponse
+        return BaseResponse.success(
+            data={
+                "session_id": session_id,
+                "content": spec_content,
+                "length": len(spec_content),
+                "format": "markdown"
+            },
+            message="开发文档生成成功"
+        )
+
+    except Exception as e:
+        logger.error(f"[Spec Generation] Error: {e}", exc_info=True)
+        from app.utils.model.response_model import BaseResponse
+        return BaseResponse.error(message=f"生成开发文档失败: {str(e)}")

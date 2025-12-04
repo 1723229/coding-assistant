@@ -76,7 +76,7 @@ class DatabaseConfig:
     def get_database_url(cls) -> str:
         """
         Build MySQL database connection URL
-        
+
         Returns:
             Complete database connection URL
         """
@@ -86,7 +86,7 @@ class DatabaseConfig:
     def get_async_database_url(cls) -> str:
         """
         Build async MySQL database connection URL
-        
+
         Returns:
             Complete async database connection URL
         """
@@ -162,6 +162,8 @@ class ClaudeConfig:
             os.environ["ANTHROPIC_API_KEY"] = cls.API_KEY
         if cls.BASE_URL:
             os.environ["ANTHROPIC_BASE_URL"] = cls.BASE_URL
+        print("Anthropic API key:", os.environ["ANTHROPIC_API_KEY"])
+        print("Base URL:", os.environ["ANTHROPIC_BASE_URL"])
 
 
 # ============================================================================
