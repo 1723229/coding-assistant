@@ -63,7 +63,6 @@ class ModuleResponse(ModuleBase):
     create_by: Optional[str] = None
     update_by: Optional[str] = None
     spec_content: Optional[str] = None
-    spec_file_content: Optional[str] = None,
     url_id: Optional[int] = None
 
     class Config:
