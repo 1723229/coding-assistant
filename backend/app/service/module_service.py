@@ -329,7 +329,7 @@ class ModuleService:
                 module.spec_content = spec_dict.get("spec_content")
                 response_data = ModuleResponse.model_validate(module)
 
-                # 创建沙箱容器 (optional, non-blocking)
+                创建沙箱容器 (optional, non-blocking)
                 try:
                     executor = get_sandbox_executor()
                     container_info = await executor.create_workspace(
@@ -351,9 +351,9 @@ class ModuleService:
                 insert_id = self.db.insert(table='sys_module', data=menu)
                 module_data.update({
                     "url_id": insert_id,
-                    "preview_url": settings.get("preview_ip") + ':' + container_info["code_port"] + data.url,
+                    "preview_url": settings.preview_ip + ':' + str(container_info["code_port"]) + data.url,
                 })
-                logger.info(f"preview_url: {settings.get("preview_ip") + ':' + container_info["code_port"] + data.url}")
+                logger.info(f"preview_url: {settings.preview_ip + ':' + str(container_info["code_port"]) + data.url}")
                 await self.module_repo.update_module(module_id=module_id, data=module_data)
                 return BaseResponse.success(
                     data=response_data,
@@ -591,9 +591,9 @@ class ModuleService:
                 insert_id = self.db.insert(table='sys_module', data=menu)
                 module_data.update({
                     "url_id": insert_id,
-                    "preview_url": settings.get("preview_ip") + ':' + container_info["code_port"] + data.url,
+                    "preview_url": settings.preview_ip + ':' + str(container_info["code_port"]) + data.url,
                 })
-                logger.info(f"preview_url: {settings.get("preview_ip") + ':' + container_info["code_port"] + data.url}")
+                logger.info(f"preview_url: {settings.preview_ip + ':' + str(container_info["code_port"]) + data.url}")
                 await self.module_repo.update_module(module_id=module_id, data=module_data)
 
                 yield f"data: {json.dumps({'type': 'step', 'step': 'create_menu', 'status': 'success', 'message': '菜单创建成功', 'progress': 100})}\n\n"
