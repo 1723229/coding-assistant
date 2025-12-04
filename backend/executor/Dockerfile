@@ -118,7 +118,11 @@ RUN source "$NVM_DIR/nvm.sh" \
     && nvm use default \
     && npm install -g @anthropic-ai/claude-code \
     && npm install -g yarn \
-    && npm install -g pnpm
+    && npm install -g pnpm \
+    && nvm install 14 \
+    && npm install -g yarn \
+    && npm install -g pnpm \
+    && nvm use default \
 
 # 配置 bash 加载 nvm
 RUN echo 'export NVM_DIR="/root/.nvm"' >> /root/.bashrc \
