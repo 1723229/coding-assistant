@@ -351,8 +351,9 @@ class ModuleService:
                 insert_id = self.db.insert(table='sys_module', data=menu)
                 module_data.update({
                     "url_id": insert_id,
-                    "preview_url": settings.get("preview_ip") + '' + container_info["code_port"] + data.url,
+                    "preview_url": settings.get("preview_ip") + ':' + container_info["code_port"] + data.url,
                 })
+                logger.info(f"preview_url: {settings.get("preview_ip") + ':' + container_info["code_port"] + data.url}")
                 await self.module_repo.update_module(module_id=module_id, data=module_data)
                 return BaseResponse.success(
                     data=response_data,
@@ -588,7 +589,11 @@ class ModuleService:
                     "sort_code": self.sort_code
                 }
                 insert_id = self.db.insert(table='sys_module', data=menu)
-                module_data.update({"url_id": insert_id})
+                module_data.update({
+                    "url_id": insert_id,
+                    "preview_url": settings.get("preview_ip") + ':' + container_info["code_port"] + data.url,
+                })
+                logger.info(f"preview_url: {settings.get("preview_ip") + ':' + container_info["code_port"] + data.url}")
                 await self.module_repo.update_module(module_id=module_id, data=module_data)
 
                 yield f"data: {json.dumps({'type': 'step', 'step': 'create_menu', 'status': 'success', 'message': '菜单创建成功', 'progress': 100})}\n\n"
@@ -612,6 +617,7 @@ class ModuleService:
                 }
                 insert_id = self.db.insert(table='sys_module', data=menu)
                 module_data.update({"url_id": insert_id})
+
 
                 module = await self.module_repo.create_module(data=module_data, created_by=created_by)
 
