@@ -2,7 +2,7 @@
 Configuration Module
 
 Provides centralized configuration management for the application.
-Supports YAML config files following employee-platform pattern.
+Supports YAML config files.
 """
 
 import os
@@ -24,7 +24,6 @@ def load_yaml_config() -> Dict[str, Any]:
     config_path = config_dir / "config.yaml"
 
     if not config_path.exists():
-        # Fallback to example config if main config doesn't exist
         config_path = config_dir / "config.example.yaml"
         if not config_path.exists():
             raise FileNotFoundError(
@@ -54,7 +53,6 @@ class DatabaseConfig:
 
     _db_config = _config.get("database", {})
 
-    # Database connection parameters
     HOST = _db_config.get("host", "localhost")
     PORT = _db_config.get("port", 3306)
     USER = _db_config.get("user", "root")
@@ -62,34 +60,20 @@ class DatabaseConfig:
     NAME = _db_config.get("name", "coding_assistant")
     CHARSET = _db_config.get("charset", "utf8mb4")
 
-    # Connection pool settings
     POOL_SIZE = _db_config.get("pool_size", 10)
     MAX_OVERFLOW = _db_config.get("max_overflow", 20)
     POOL_RECYCLE = _db_config.get("pool_recycle", 3600)
 
-    # Connection timeout settings
     CONNECT_TIMEOUT = _db_config.get("connect_timeout", 60)
     READ_TIMEOUT = _db_config.get("read_timeout", 60)
     WRITE_TIMEOUT = _db_config.get("write_timeout", 60)
 
     @classmethod
     def get_database_url(cls) -> str:
-        """
-        Build MySQL database connection URL
-
-        Returns:
-            Complete database connection URL
-        """
         return f"mysql+pymysql://{cls.USER}:{cls.PASSWORD}@{cls.HOST}:{cls.PORT}/{cls.NAME}"
 
     @classmethod
     def get_async_database_url(cls) -> str:
-        """
-        Build async MySQL database connection URL
-
-        Returns:
-            Complete async database connection URL
-        """
         return f"mysql+aiomysql://{cls.USER}:{cls.PASSWORD}@{cls.HOST}:{cls.PORT}/{cls.NAME}"
 
 
@@ -110,60 +94,7 @@ class ServerConfig:
 
     @classmethod
     def get_web_interface_url(cls) -> str:
-        """
-        Get Web interface URL
-        
-        Returns:
-            Complete Web interface URL
-        """
         return f"http://localhost:{cls.PORT}"
-
-
-# ============================================================================
-# Claude Configuration
-# ============================================================================
-
-class ClaudeConfig:
-    """Claude SDK configuration management"""
-
-    _claude_config = _config.get("claude", {})
-
-    # API Settings
-    API_KEY = _claude_config.get("api_key")
-    BASE_URL = _claude_config.get("base_url")
-
-    # Model selection
-    MODEL = _claude_config.get("model")
-
-    # Default tools
-    DEFAULT_TOOLS = _claude_config.get("default_tools", [
-        "Read",
-        "Write",
-        "Edit",
-        "MultiEdit",
-        "Bash",
-        "Glob",
-        "Grep",
-        "LS",
-        "TodoRead",
-        "TodoWrite",
-    ])
-
-    # Permission mode
-    PERMISSION_MODE = _claude_config.get("permission_mode", "acceptEdits")
-
-    # Session settings
-    SESSION_TIMEOUT = _claude_config.get("session_timeout", 1800)  # 30 minutes
-
-    @classmethod
-    def setup_environment(cls):
-        """Set up environment variables for Claude SDK"""
-        if cls.API_KEY:
-            os.environ["ANTHROPIC_API_KEY"] = cls.API_KEY
-        if cls.BASE_URL:
-            os.environ["ANTHROPIC_BASE_URL"] = cls.BASE_URL
-        print("Anthropic API key:", os.environ["ANTHROPIC_API_KEY"])
-        print("Base URL:", os.environ["ANTHROPIC_BASE_URL"])
 
 
 # ============================================================================
@@ -197,11 +128,11 @@ class WorkspaceConfig:
 
 
 # ============================================================================
-# Docker Configuration
+# Docker Configuration (Legacy - for workspace containers)
 # ============================================================================
 
 class DockerConfig:
-    """Docker configuration management"""
+    """Docker configuration for workspace containers (legacy)"""
 
     _docker_config = _config.get("docker", {})
 
@@ -212,20 +143,56 @@ class DockerConfig:
 
 
 # ============================================================================
-# Pydantic Settings (for backward compatibility and validation)
+# Executor Configuration (Sandbox Mode)
+# ============================================================================
+
+class ExecutorConfig:
+    """Executor configuration for sandbox containers"""
+
+    _executor_config = _config.get("executor", {})
+
+    # Docker image for executor containers
+    IMAGE = _executor_config.get("image", "coding-assistant-executor:latest")
+    
+    # Port range for executor containers (API service)
+    API_PORT_RANGE_MIN = _executor_config.get("api_port_range_min", 10001)
+    API_PORT_RANGE_MAX = _executor_config.get("api_port_range_max", 10100)
+    
+    # Port range for code service
+    CODE_PORT_RANGE_MIN = _executor_config.get("code_port_range_min", 20001)
+    CODE_PORT_RANGE_MAX = _executor_config.get("code_port_range_max", 20100)
+    
+    # Timeouts in seconds
+    REQUEST_TIMEOUT = _executor_config.get("request_timeout", 300)
+    STREAM_TIMEOUT = _executor_config.get("stream_timeout", 600)
+    HEALTH_CHECK_TIMEOUT = _executor_config.get("health_check_timeout", 30)
+    
+    # Container resource limits
+    MEMORY_LIMIT = _executor_config.get("container_memory", "4g")
+    CPU_COUNT = _executor_config.get("container_cpu", 2)
+    
+    # Docker host address (for container-to-host communication)
+    DOCKER_HOST = _executor_config.get("docker_host", "host.docker.internal")
+    
+    # Session timeout
+    SESSION_TIMEOUT = _executor_config.get("session_timeout", 1800)
+    
+    # Claude API Configuration (passed to sandbox containers)
+    ANTHROPIC_API_KEY = _executor_config.get("anthropic_api_key", "")
+    ANTHROPIC_BASE_URL = _executor_config.get("anthropic_base_url", "")
+    ANTHROPIC_MODEL = _executor_config.get("anthropic_model", "claude-sonnet-4-20250514")
+
+
+# ============================================================================
+# Pydantic Settings
 # ============================================================================
 
 class Settings(BaseSettings):
     """Application settings with validation"""
 
     # Application
-    app_name: str = "Claude Code Web Platform"
+    app_name: str = "Coding Assistant"
     debug: bool = ServerConfig.DEBUG
-
-    # API Configuration
-    anthropic_api_key: str = ClaudeConfig.API_KEY
-    anthropic_base_url: str = ClaudeConfig.BASE_URL
-    anthropic_model: str = ClaudeConfig.MODEL
 
     # GitHub Configuration
     github_token: str = GitHubConfig.TOKEN
@@ -237,9 +204,22 @@ class Settings(BaseSettings):
     # Workspace Configuration
     workspace_base_path: Path = WorkspaceConfig.BASE_PATH
 
-    # Docker Configuration
+    # Docker Configuration (Legacy - for workspace containers)
     docker_image: str = DockerConfig.IMAGE
     docker_network: str = DockerConfig.NETWORK
+    docker_memory_limit: str = DockerConfig.MEMORY_LIMIT
+    docker_cpu_quota: int = DockerConfig.CPU_QUOTA
+
+    # Executor Configuration (Sandbox Mode)
+    executor_image: str = ExecutorConfig.IMAGE
+    executor_api_port_range_min: int = ExecutorConfig.API_PORT_RANGE_MIN
+    executor_api_port_range_max: int = ExecutorConfig.API_PORT_RANGE_MAX
+    executor_code_port_range_min: int = ExecutorConfig.CODE_PORT_RANGE_MIN
+    executor_code_port_range_max: int = ExecutorConfig.CODE_PORT_RANGE_MAX
+    executor_request_timeout: int = ExecutorConfig.REQUEST_TIMEOUT
+    executor_stream_timeout: int = ExecutorConfig.STREAM_TIMEOUT
+    executor_memory_limit: str = ExecutorConfig.MEMORY_LIMIT
+    executor_cpu_count: int = ExecutorConfig.CPU_COUNT
 
     # Server
     host: str = ServerConfig.HOST
@@ -255,8 +235,6 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    # Setup Claude environment variables
-    ClaudeConfig.setup_environment()
     # Ensure workspace exists
     WorkspaceConfig.ensure_exists()
     return Settings()
@@ -270,10 +248,10 @@ __all__ = [
     "load_yaml_config",
     "DatabaseConfig",
     "ServerConfig",
-    "ClaudeConfig",
     "GitHubConfig",
     "WorkspaceConfig",
     "DockerConfig",
+    "ExecutorConfig",
     "Settings",
     "get_settings",
 ]

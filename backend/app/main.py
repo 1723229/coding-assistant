@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude Code Web Platform - Main FastAPI Application
+Coding Assistant - Main FastAPI Application
 
 主应用入口文件
 """
@@ -23,11 +23,11 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 # Import application configurations and components
-from app.config import ServerConfig, ClaudeConfig
+from app.config import ServerConfig, ExecutorConfig
 from app.config.logging_config import LoggingConfig
 from app.utils.exceptions import register_exception_handlers
 from app.db.base import init_db, dispose_db
-from app.core.claude_service import session_claude_manager
+from app.core.claude_service import session_manager
 
 # Import API routers
 from app.api import (
@@ -46,9 +46,6 @@ LoggingConfig().setup_logging()
 # Initialize logger (after logging setup)
 logger = logging.getLogger(__name__)
 
-# Setup Claude environment variables
-ClaudeConfig.setup_environment()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -57,11 +54,11 @@ async def lifespan(app: FastAPI):
     
     处理启动和关闭事件:
     - 数据库初始化
-    - Claude会话管理器清理任务
+    - 会话管理器清理任务
     """
     # Startup
     logger.info("=" * 80)
-    logger.info("Starting Claude Code Web Platform...")
+    logger.info("Starting Coding Assistant...")
     logger.info("=" * 80)
     
     # Initialize database
@@ -72,12 +69,12 @@ async def lifespan(app: FastAPI):
         logger.error(f"Database initialization failed: {e}")
         logger.warning("Application will start but database operations may fail")
     
-    # Start Claude session cleanup task
+    # Start session cleanup task
     try:
-        await session_claude_manager.start_cleanup_task()
-        logger.info("Claude session manager started")
+        await session_manager.start_cleanup_task()
+        logger.info("Session manager started")
     except Exception as e:
-        logger.error(f"Claude session manager failed to start: {e}")
+        logger.error(f"Session manager failed to start: {e}")
     
     logger.info("Application startup complete")
     logger.info(f"Server URL: http://{ServerConfig.HOST}:{ServerConfig.PORT}")
@@ -90,13 +87,13 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down application...")
     
-    # Stop Claude session cleanup task
+    # Stop session cleanup task
     try:
-        await session_claude_manager.stop_cleanup_task()
-        await session_claude_manager.close_all()
-        logger.info("Claude session manager stopped")
+        await session_manager.stop_cleanup_task()
+        await session_manager.close_all()
+        logger.info("Session manager stopped")
     except Exception as e:
-        logger.error(f"Error stopping Claude session manager: {e}")
+        logger.error(f"Error stopping session manager: {e}")
     
     # Close database connections
     try:
@@ -116,9 +113,9 @@ def create_app() -> FastAPI:
         配置好的FastAPI应用实例
     """
     app = FastAPI(
-        title="Claude Code Web Platform",
+        title="Coding Assistant",
         version="1.0.0",
-        description="Web-based Claude Code programming platform with multi-turn conversation support",
+        description="AI-powered coding assistant with sandbox execution",
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,
@@ -167,11 +164,11 @@ def run_api(host: str, port: int, **kwargs):
 
 def main() -> None:
     """
-    Claude Code Web Platform主入口
+    Coding Assistant主入口
     """
     try:
         logger.info("=" * 80)
-        logger.info("Starting Claude Code Web Platform...")
+        logger.info("Starting Coding Assistant...")
         logger.info("=" * 80)
 
         logger.info("\n" + "=" * 80)
@@ -189,7 +186,7 @@ def main() -> None:
         )
 
     except KeyboardInterrupt:
-        logger.info("\nShutting down Claude Code Web Platform gracefully...")
+        logger.info("\nShutting down Coding Assistant gracefully...")
     except Exception as e:
         error_msg = f"Error starting server: {e}"
         logger.error(error_msg)
@@ -200,8 +197,8 @@ def main() -> None:
 app = create_app()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(prog='claude-code-web',
-                                     description='Claude Code Web Platform Server')
+    parser = argparse.ArgumentParser(prog='coding-assistant',
+                                     description='Coding Assistant Server')
     parser.add_argument("--host", type=str, default=ServerConfig.HOST)
     parser.add_argument("--port", type=int, default=ServerConfig.PORT)
     parser.add_argument("--reload", action="store_true", default=ServerConfig.RELOAD)
@@ -210,7 +207,7 @@ if __name__ == "__main__":
 
     try:
         logger.info("=" * 80)
-        logger.info("Starting Claude Code Web Platform Server...")
+        logger.info("Starting Coding Assistant Server...")
         logger.info("=" * 80)
         logger.info(f"  - Server URL: http://{args.host}:{args.port}")
         logger.info(f"  - Documentation: http://{args.host}:{args.port}/docs")

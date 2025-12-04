@@ -3,17 +3,18 @@ Chat API Router
 
 聊天相关的API路由定义
 使用SSE (Server-Sent Events) 进行流式聊天，HTTP用于历史记录和统计
+
+All execution happens in sandbox containers.
 """
 
 import asyncio
 import json
 import logging
 from typing import Optional, Dict, AsyncGenerator
-from pathlib import Path as _Path
 from datetime import datetime
 
 from app.config import get_settings
-from app.core.claude_service import ChatMessage, session_claude_manager
+from app.core.claude_service import ChatMessage, session_manager
 from app.core.github_service import GitHubService
 from app.db.repository import SessionRepository, MessageRepository, ModuleRepository, VersionRepository
 from app.db.schemas.version import VersionCreate
@@ -46,7 +47,6 @@ class ChatRequest(BaseModel):
     """聊天请求模型"""
     content: str
 
-
 class SpecGenerationRequest(BaseModel):
     """Spec文档生成请求模型"""
     content: str = Field(..., description="功能需求描述")
@@ -56,8 +56,8 @@ class SpecGenerationRequest(BaseModel):
 # Active Sessions Tracking
 # ===================
 
-class SessionManager:
-    """会话管理器 - 跟踪活跃的流式会话"""
+class ActiveSessionTracker:
+    """跟踪活跃的流式会话"""
 
     def __init__(self):
         self.active_sessions: Dict[str, bool] = {}
@@ -78,7 +78,7 @@ class SessionManager:
         return self.active_sessions.get(session_id, False)
 
 
-session_manager = SessionManager()
+active_session_tracker = ActiveSessionTracker()
 
 
 # ===================
@@ -126,32 +126,32 @@ async def chat_stream_generator(
     """
     try:
         # 标记会话为活跃
-        session_manager.start_session(session_id)
+        active_session_tracker.start_session(session_id)
 
-        # 立即发送连接确认 - 确保客户端知道连接已建立
+        # 立即发送连接确认
         yield f"data: {json.dumps({'type': 'connected', 'session_id': session_id})}\n\n"
-
-        # 强制刷新
         await asyncio.sleep(0)
 
         # 保存用户消息
         await save_message(session_id, "user", user_message)
 
-        # 创建Claude服务
-        claude_service = await session_claude_manager.get_service(
+        # 获取沙箱服务
+        sandbox_service = await session_manager.get_service(
             session_id=session_id,
             workspace_path=workspace_path,
         )
 
+        logger.info(f"[SSE] Starting chat for session: {session_id}")
+
         # 流式响应
         full_response = []
         try:
-            async for chat_msg in claude_service.chat_stream(
+            async for chat_msg in sandbox_service.chat_stream(
                     user_message,
                     session_id=session_id,
             ):
                 # 检查会话是否被中断
-                if not session_manager.is_active(session_id):
+                if not active_session_tracker.is_active(session_id):
                     yield f"data: {json.dumps({'type': 'interrupted', 'message': 'Stream interrupted'})}\n\n"
                     break
 
@@ -162,7 +162,6 @@ async def chat_stream_generator(
                 if chat_msg.type in ("text", "text_delta"):
                     full_response.append(chat_msg.content)
 
-                # 小延迟防止刷屏
                 await asyncio.sleep(0.01)
 
             # 保存助手响应
@@ -181,8 +180,7 @@ async def chat_stream_generator(
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
 
     finally:
-        # 标记会话为非活跃
-        session_manager.stop_session(session_id)
+        active_session_tracker.stop_session(session_id)
 
 
 @chat_router.post(
@@ -191,16 +189,14 @@ async def chat_stream_generator(
     operation_id="chat_stream"
 )
 async def chat_stream(
-        session_id: str = Path(description="Session ID"),
+        session_id: str = Path(..., description="Session ID"),
         request: ChatRequest = Body(...),
 ):
     """
     SSE流式聊天端点
 
     使用Server-Sent Events进行流式响应
-    客户端应使用EventSource连接到此端点
     """
-    # 获取会话信息
     try:
         session = await session_repo.get_session_by_id(session_id)
 
@@ -214,14 +210,13 @@ async def chat_stream(
         logger.error(f"[SSE] Database error: {e}")
         return {"error": f"Database error: {str(e)}"}
 
-    # 返回SSE流
     return StreamingResponse(
         chat_stream_generator(session_id, request.content, workspace_path),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # 禁用nginx缓冲
+            "X-Accel-Buffering": "no",
         }
     )
 
@@ -234,18 +229,77 @@ async def chat_stream(
 async def interrupt_chat(session_id: str = Path(..., description="Session ID")):
     """中断当前的流式响应"""
     try:
-        session_manager.stop_session(session_id)
+        active_session_tracker.stop_session(session_id)
 
-        # 也尝试中断Claude服务
-        claude_service = await session_claude_manager.get_service(
+        # 中断沙箱服务
+        sandbox_service = await session_manager.get_service(
             session_id=session_id,
-            workspace_path="",  # 中断时不需要workspace_path
+            workspace_path="",
         )
-        await claude_service.interrupt()
+        await sandbox_service.interrupt()
 
         return {"message": "Chat stream interrupted", "session_id": session_id}
     except Exception as e:
         logger.error(f"Failed to interrupt chat: {e}")
+        return {"error": str(e)}
+
+
+# ===================
+# Container Management Routes
+# ===================
+
+@chat_router.get(
+    "/container/{session_id}/status",
+    summary="获取容器状态",
+    operation_id="get_container_status"
+)
+async def get_container_status(session_id: str = Path(..., description="Session ID")):
+    """获取会话容器的状态"""
+    try:
+        from app.core.executor import get_sandbox_executor
+        executor = get_sandbox_executor()
+        status = await executor.get_container_status(session_id)
+        return status
+    except Exception as e:
+        logger.error(f"Failed to get container status: {e}")
+        return {"error": str(e)}
+
+
+@chat_router.get(
+    "/container/{session_id}/health",
+    summary="容器健康检查",
+    operation_id="container_health_check"
+)
+async def container_health_check(session_id: str = Path(..., description="Session ID")):
+    """对会话容器进行健康检查"""
+    try:
+        from app.core.executor import get_sandbox_executor
+        executor = get_sandbox_executor()
+        health = await executor.health_check(session_id)
+        return health
+    except Exception as e:
+        logger.error(f"Failed to perform health check: {e}")
+        return {"error": str(e)}
+
+
+@chat_router.delete(
+    "/container/{session_id}",
+    summary="删除容器",
+    operation_id="delete_container"
+)
+async def delete_container(session_id: str = Path(..., description="Session ID")):
+    """删除会话容器"""
+    try:
+        from app.core.executor import get_sandbox_executor
+        executor = get_sandbox_executor()
+        success = await executor.cleanup(session_id)
+
+        if success:
+            return {"message": f"Container for session {session_id} deleted", "status": "success"}
+        else:
+            return {"message": f"Container for session {session_id} not found", "status": "not_found"}
+    except Exception as e:
+        logger.error(f"Failed to delete container: {e}")
         return {"error": str(e)}
 
 
@@ -285,6 +339,7 @@ async def get_session_stats(session_id: str):
 async def get_all_stats():
     """获取所有会话的统计信息"""
     return await chat_service.get_all_stats()
+
 
 
 @chat_router.post(
@@ -420,26 +475,26 @@ async def generate_spec_document(
 
 请开始生成开发文档："""
 
-        # 创建Claude服务（使用一个临时的session_id来避免干扰正常对话）
+        # 创建沙箱服务（使用一个临时的session_id来避免干扰正常对话）
         spec_generation_session_id = f"{session_id}_spec_gen"
-        claude_service = await session_claude_manager.get_service(
+        sandbox_service = await session_manager.get_service(
             session_id=spec_generation_session_id,
             workspace_path=workspace_path,
         )
 
-        # 调用非流式chat方法获取完整响应
-        logger.info("[Spec Generation] Sending request to Claude...")
+        # 调用流式chat方法获取完整响应
+        logger.info("[Spec Generation] Sending request to sandbox...")
         spec_content = ""
-        async for chat_msg in claude_service.chat_stream(
+        async for chat_msg in sandbox_service.chat_stream(
                 spec_prompt,
-                session_id=session_id,
+                session_id=spec_generation_session_id,
         ):
             # 收集文本用于保存
             if chat_msg.type == "text":
                 spec_content += chat_msg.content + "\n"
 
         # 清理临时session
-        await session_claude_manager.close_session(spec_generation_session_id)
+        await session_manager.close_session(spec_generation_session_id)
 
         logger.info(f"[Spec Generation] Generated document length: {len(spec_content)} characters")
 

@@ -470,41 +470,6 @@ class GitHubService:
         
         return repo
     
-    async def clone_repo_in_container(
-        self,
-        session_id: str,
-        repo_url: str,
-        branch: Optional[str] = None,
-    ) -> None:
-        """Clone a repository inside a Docker container.
-        
-        Args:
-            session_id: Session identifier for the container
-            repo_url: GitHub repository URL
-            branch: Branch to checkout (default: main)
-        """
-        from .docker_service import docker_service
-        
-        # Add token to URL for private repos
-        clone_url = self._build_authenticated_url(repo_url)
-        
-        # Build git clone command
-        branch_arg = f"-b {branch}" if branch and branch.strip() else ""
-        git_command = f"git clone {branch_arg} {clone_url} /workspace".strip()
-        
-        # Execute in container
-        exit_code, output = await docker_service.execute_command(
-            session_id=session_id,
-            command=git_command,
-            workdir="/workspace"
-        )
-        
-        if exit_code != 0:
-            raise GitOperationError(
-                message=f"Failed to clone repository: {output}",
-                operation="clone_in_container",
-                details={"exit_code": exit_code, "output": output}
-            )
     
     @git_operation("get_local_changes")
     async def get_local_changes(

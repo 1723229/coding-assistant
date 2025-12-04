@@ -28,40 +28,6 @@ database:
   read_timeout: 60
   write_timeout: 60
 
-# Claude Configuration
-claude:
-  # API Settings
-  api_key: "sk-e43189bfbcc24a01bab723f9ebb38e81"
-  base_url: "https://dashscope.aliyuncs.com/apps/anthropic"
-
-  # Model selection
-  model: "qwen3-coder-plus"
-
-  # Default tools for Claude Code
-  default_tools:
-    - "Task"
-    - "Bash"
-    - "Edit"
-    - "Read"
-    - "Write"
-    - "Glob"
-    - "Grep"
-    - "NotebookEdit"
-    - "WebFetch"
-    - "WebSearch"
-    - "TodoWrite"
-    - "BashOutput"
-    - "KillBash"
-    - "ExitPlanMode"
-    - "ListMcpResources"
-    - "ReadMcpResource"
-  
-  # Permission mode: acceptEdits, bypassPermissions, etc.
-  permission_mode: "acceptEdits"
-  
-  # Session settings
-  session_timeout: 1800  # 30 minutes
-
 # GitHub Configuration
 github:
   token: "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"
@@ -71,9 +37,38 @@ github:
 workspace:
   base_path: "./workspaces"
 
-# Docker Configuration (optional)
-docker:
-  image: "claude-workspace:latest"
-  network: "claude-network"
-  memory_limit: "2g"
-  cpu_quota: 100000
+# Executor Configuration (Sandbox Containers)
+# All task execution happens in isolated Docker containers
+executor:
+  # Docker image for executor containers
+  # Build with: docker build -f backend/executor/Dockerfile -t coding-assistant-executor:latest .
+  image: "coding-assistant-executor:latest"
+  
+  # Port range for executor containers (API service)
+  api_port_range_min: 10001
+  api_port_range_max: 10100
+  
+  # Port range for code service
+  code_port_range_min: 20001
+  code_port_range_max: 20100
+  
+  # Timeouts in seconds
+  request_timeout: 300      # Sync request timeout
+  stream_timeout: 600       # SSE stream timeout
+  health_check_timeout: 30  # Container health check timeout
+  
+  # Container resource limits
+  container_memory: "4g"    # Memory limit per container
+  container_cpu: 2          # CPU count per container
+  
+  # Docker host address (for container-to-host communication)
+  # Use "host.docker.internal" for Mac/Windows, or actual host IP for Linux
+  docker_host: "host.docker.internal"
+  
+  # Session timeout in seconds
+  session_timeout: 1800     # 30 minutes
+  
+  # Claude API Configuration (passed to sandbox containers)
+  anthropic_api_key: "sk-e43189bfbcc24a01bab723f9ebb38e81"
+  anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic"
+  anthropic_model: "qwen3-coder-plus"

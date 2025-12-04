@@ -77,7 +77,7 @@ class SessionService:
     @log_print
     async def create_session(self, data: SessionCreate):
         """创建新会话"""
-        from app.core.docker_service import docker_service
+        from app.core.executor import get_sandbox_executor
         from app.core.github_service import GitHubService
         
         try:
@@ -93,17 +93,8 @@ class SessionService:
                 github_branch=data.github_branch or "main",
             )
             
-            # 尝试创建Docker容器
-            try:
-                container_info = await docker_service.create_workspace(
-                    session_id=session_id,
-                    workspace_path=workspace_path
-                )
-                await self.session_repo.update_session(session_id, container_id=container_info.id)
-            except Exception as e:
-                logger.warning(f"Failed to create container: {e}")
-            
-            # 如果提供了GitHub仓库，尝试克隆
+            # 如果提供了GitHub仓库，先克隆（在创建容器之前）
+            # 这样容器挂载时 workspace 目录已经有内容
             if data.github_repo_url:
                 try:
                     token_record = await self.token_repo.get_latest_token(platform="GitHub")
@@ -113,8 +104,20 @@ class SessionService:
                         target_path=workspace_path,
                         branch=data.github_branch,
                     )
+                    logger.info(f"Cloned repo to workspace: {workspace_path}")
                 except Exception as e:
                     logger.warning(f"Failed to clone repo: {e}")
+            
+            # 创建沙箱容器（在 clone 之后，这样 volume mount 就有内容了）
+            try:
+                executor = get_sandbox_executor()
+                container_info = await executor.create_workspace(
+                    session_id=session_id,
+                    workspace_path=workspace_path
+                )
+                await self.session_repo.update_session(session_id, container_id=container_info["id"])
+            except Exception as e:
+                logger.warning(f"Failed to create container: {e}")
             
             # 刷新会话数据
             session = await self.session_repo.get_session_by_id(session_id)

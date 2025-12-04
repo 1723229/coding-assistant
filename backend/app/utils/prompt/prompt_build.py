@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from app.core.claude_service import ClaudeService, MessageType
+from app.core.claude_service import session_manager, MessageType
 
 logger = logging.getLogger(__name__)
 
@@ -58,19 +58,18 @@ async def generate_code_from_spec(
 
 请开始实现代码，使用工具直接修改工作空间中的文件。"""
 
-        # 创建 ClaudeService 实例
-        claude_service = ClaudeService(
-            workspace_path=workspace_path,
+        # 获取沙箱服务实例
+        sandbox_service = await session_manager.get_service(
             session_id=session_id,
-            permission_mode="bypassPermissions"  # 使用自动批准模式
+            workspace_path=workspace_path,
         )
 
-        # 调用 Claude 生成代码（使用streaming）
-        logger.info("Calling Claude to generate code from spec...")
+        # 调用沙箱服务生成代码（使用streaming）
+        logger.info("Calling sandbox service to generate code from spec...")
 
         # 收集所有消息用于日志
         all_messages = []
-        async for msg in claude_service.chat_stream(prompt=prompt, session_id=session_id):
+        async for msg in sandbox_service.chat_stream(prompt=prompt, session_id=session_id):
             all_messages.append(msg)
             # 记录重要的消息类型
             if msg.type in [MessageType.TOOL_USE.value, MessageType.ERROR.value]:

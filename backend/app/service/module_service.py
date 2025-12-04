@@ -20,9 +20,9 @@ from app.db.repository import ModuleRepository, ProjectRepository, VersionReposi
     MessageRepository
 from app.db.schemas import ModuleCreate, ModuleUpdate, ModuleResponse, VersionCreate
 from app.db.models.module import ModuleType
-from app.core.docker_service import docker_service
+from app.core.executor import get_sandbox_executor
 from app.core.github_service import GitHubService
-from app.core.claude_service import ClaudeService
+from app.core.claude_service import SandboxService, session_manager
 from app.utils.mysql_util import MySQLUtil
 from datetime import datetime
 from app.utils.prompt.prompt_build import generate_code_from_spec
@@ -98,16 +98,15 @@ class ModuleService:
 
 请直接输出Markdown格式的文档内容，不要有任何额外的解释或说明。"""
 
-            # 创建 ClaudeService 实例
-            claude_service = ClaudeService(
-                workspace_path=workspace_path,
+            # 获取沙箱服务实例
+            sandbox_service = await session_manager.get_service(
                 session_id=session_id,
-                permission_mode="bypassPermissions"  # 使用自动批准模式
+                workspace_path=workspace_path,
             )
 
-            # 调用 Claude 生成文档
-            logger.info("Calling Claude to generate spec document...")
-            messages = await claude_service.chat(prompt=prompt, session_id=session_id)
+            # 调用沙箱服务生成文档
+            logger.info("Calling sandbox service to generate spec document...")
+            messages = await sandbox_service.chat(prompt=prompt, session_id=session_id)
 
             # 提取文本内容
             spec_content = ""
@@ -330,15 +329,16 @@ class ModuleService:
                 module.spec_content = spec_dict.get("spec_content")
                 response_data = ModuleResponse.model_validate(module)
 
-                # todo Create Docker container (optional, non-blocking)
+                # 创建沙箱容器 (optional, non-blocking)
                 try:
-                    container_info = await docker_service.create_workspace(
+                    executor = get_sandbox_executor()
+                    container_info = await executor.create_workspace(
                         session_id=session_id,
                         workspace_path=workspace_path
                     )
-                    logger.info(f"Docker container created: {container_info.id}")
+                    logger.info(f"Sandbox container created: {container_info['id']}")
                     module_data.update({
-                        "container_id": container_info.id,
+                        "container_id": container_info["id"],
                     })
                     await self.module_repo.update_module(module_id=module_id, data=module_data)
                 except Exception as e:
@@ -555,18 +555,20 @@ class ModuleService:
                         yield f"data: {json.dumps({'type': 'error', 'message': f'文档/代码生成失败: {str(e)}'})}\n\n"
                         return
 
-                # 步骤9: 创建Docker容器
-                yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'progress', 'message': '创建Docker容器...', 'progress': 95})}\n\n"
+                # 步骤9: 创建沙箱容器
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'progress', 'message': '创建沙箱容器...', 'progress': 95})}\n\n"
 
                 try:
-                    container_info = await docker_service.create_workspace(
+                    executor = get_sandbox_executor()
+                    container_info = await executor.create_workspace(
                         session_id=session_id,
                         workspace_path=workspace_path
                     )
-                    module_data.update({"container_id": container_info.id})
+                    module_data.update({"container_id": container_info["id"]})
                     await self.module_repo.update_module(module_id=module_id, data=module_data)
 
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'success', 'message': f'容器ID: {container_info.id[:12]}', 'progress': 97})}\n\n"
+                    container_id_short = container_info["id"][:12]
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'success', 'message': f'容器ID: {container_id_short}', 'progress': 97})}\n\n"
                 except Exception as e:
                     logger.warning(f"Container creation failed: {e}")
                     await self.module_repo.delete_module(module_id=module_id)
@@ -715,10 +717,11 @@ class ModuleService:
             # Clean up POINT type resources
             if module.type == ModuleType.POINT:
                 # Clean up container if exists
-                if module.container_id:
+                if module.session_id:
                     try:
-                        await docker_service.stop_container(module.container_id)
-                        logger.info(f"Stopped container: {module.container_id}")
+                        executor = get_sandbox_executor()
+                        await executor.stop_container(module.session_id)
+                        logger.info(f"Stopped container for session: {module.session_id}")
                     except Exception as e:
                         logger.warning(f"Failed to stop container: {e}")
 
@@ -787,11 +790,15 @@ class ModuleService:
             if module.type != ModuleType.POINT:
                 return BaseResponse.error(message="只有 POINT 类型模块有容器")
 
-            if not module.container_id:
-                return BaseResponse.error(message="模块没有关联的容器")
+            if not module.session_id:
+                return BaseResponse.error(message="模块没有关联的会话")
 
             # Restart container
-            await docker_service.restart_container(module.container_id)
+            executor = get_sandbox_executor()
+            await executor.restart_container(
+                session_id=module.session_id,
+                workspace_path=module.workspace_path or ""
+            )
 
             return BaseResponse.success(message="容器重启成功")
         except Exception as e:
@@ -965,17 +972,21 @@ class ModuleService:
                 yield f"data: {json.dumps({'type': 'step', 'step': 'update_module', 'status': 'warning', 'message': '模块更新失败', 'progress': 92}, ensure_ascii=False)}\\n\\n"
 
             # 步骤9: 重启容器
-            yield f"data: {json.dumps({'type': 'step', 'step': 'restart_container', 'status': 'progress', 'message': '重启Docker容器...', 'progress': 95}, ensure_ascii=False)}\\n\\n"
+            yield f"data: {json.dumps({'type': 'step', 'step': 'restart_container', 'status': 'progress', 'message': '重启沙箱容器...', 'progress': 95}, ensure_ascii=False)}\\n\\n"
 
-            if module.container_id:
+            if module.session_id:
                 try:
-                    await docker_service.restart_container(module.container_id)
+                    executor = get_sandbox_executor()
+                    await executor.restart_container(
+                        session_id=module.session_id,
+                        workspace_path=module.workspace_path or ""
+                    )
                     yield f"data: {json.dumps({'type': 'step', 'step': 'restart_container', 'status': 'success', 'message': '容器重启成功', 'progress': 100}, ensure_ascii=False)}\\n\\n"
                 except Exception as e:
                     logger.warning(f"Failed to restart container: {e}")
                     yield f"data: {json.dumps({'type': 'step', 'step': 'restart_container', 'status': 'warning', 'message': f'容器重启失败: {str(e)}', 'progress': 100}, ensure_ascii=False)}\\n\\n"
             else:
-                yield f"data: {json.dumps({'type': 'step', 'step': 'restart_container', 'status': 'warning', 'message': '模块无关联容器', 'progress': 100}, ensure_ascii=False)}\\n\\n"
+                yield f"data: {json.dumps({'type': 'step', 'step': 'restart_container', 'status': 'warning', 'message': '模块无关联会话', 'progress': 100}, ensure_ascii=False)}\\n\\n"
 
             # 完成
             yield f"data: {json.dumps({'type': 'complete', 'module_id': module.id, 'commit_id': commit_id, 'version_id': version_id, 'message': '优化完成'}, ensure_ascii=False)}\\n\\n"
