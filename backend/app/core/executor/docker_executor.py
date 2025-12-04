@@ -8,6 +8,9 @@ This module provides the main executor implementation that:
 - Proxies SSE streams from containers
 """
 
+import os
+import subprocess
+import threading
 import logging
 from typing import Dict, Any, Optional, AsyncGenerator
 
@@ -264,8 +267,11 @@ class SandboxDockerExecutor(ExecutorBase):
                 session_id=session_id,
                 workspace_path=workspace_path,
             )
-            
-            return {
+
+            # 判断根目录是否存在startup.sh脚本，存在则在容器中执行（异步线程，不阻塞）
+            self._run_startup_script_async(container.name, workspace_path)
+
+            result = {
                 "id": container.name,
                 "name": container.name,
                 "api_port": container.api_port,
@@ -275,6 +281,10 @@ class SandboxDockerExecutor(ExecutorBase):
                 "status": container.status,
                 "workspace_path": workspace_path,
             }
+
+            logger.info(f"Created workspace container {result}")
+
+            return result
         except Exception as e:
             logger.error(f"Failed to create workspace for session {session_id}: {e}")
             raise ExecutorError(f"Failed to create workspace: {e}")
@@ -321,6 +331,94 @@ class SandboxDockerExecutor(ExecutorBase):
     def get_container_manager(self) -> ContainerManager:
         """Get the container manager instance."""
         return self._container_manager
+    
+    def _run_startup_script_async(
+        self,
+        container_name: str,
+        workspace_path: str,
+    ) -> None:
+        """
+        Check and run startup.sh script in a separate thread (non-blocking).
+        
+        Args:
+            container_name: Name of the container
+            workspace_path: Host path to workspace directory
+        """
+        startup_script = os.path.join(workspace_path, "startup.sh")
+        
+        # Check if startup.sh exists on host
+        if not os.path.exists(startup_script):
+            logger.debug(f"No startup.sh found in {workspace_path}")
+            return
+        
+        # Run in separate thread to avoid blocking
+        thread = threading.Thread(
+            target=self._run_startup_script_sync,
+            args=(container_name, workspace_path),
+            daemon=True,
+        )
+        thread.start()
+        logger.info(f"Started startup.sh execution thread for container {container_name}")
+    
+    def _run_startup_script_sync(
+        self,
+        container_name: str,
+        workspace_path: str,
+    ) -> bool:
+        """
+        Synchronously run startup.sh script in container (called from thread).
+        
+        Args:
+            container_name: Name of the container
+            workspace_path: Host path to workspace directory
+            
+        Returns:
+            bool: True if script was executed successfully
+        """
+        try:
+            logger.info(f"Found startup.sh in {workspace_path}, executing in container {container_name}")
+            
+            # Make script executable in container
+            chmod_cmd = [
+                "docker", "exec", "-u", "root",
+                container_name,
+                "chmod", "+x", f"{WORKSPACE_MOUNT_PATH}/startup.sh"
+            ]
+            
+            chmod_result = subprocess.run(
+                chmod_cmd,
+                capture_output=True,
+                text=True,
+            )
+            
+            if chmod_result.returncode != 0:
+                logger.warning(f"Failed to chmod startup.sh: {chmod_result.stderr}")
+                return False
+            
+            # Execute startup script in background (detached)
+            exec_cmd = [
+                "docker", "exec", "-d",
+                container_name,
+                "/bin/bash", "-c",
+                f"cd {WORKSPACE_MOUNT_PATH} && ./startup.sh > /tmp/startup.log 2>&1"
+            ]
+            
+            exec_result = subprocess.run(
+                exec_cmd,
+                capture_output=True,
+                text=True,
+            )
+            
+            if exec_result.returncode != 0:
+                logger.warning(f"Failed to execute startup.sh: {exec_result.stderr}")
+                return False
+            
+            logger.info(f"Successfully started startup.sh in container {container_name}")
+            return True
+            
+        except Exception as e:
+            logger.exception(f"Error running startup.sh in container {container_name}: {e}")
+            return False
 
 
 # Global executor instance

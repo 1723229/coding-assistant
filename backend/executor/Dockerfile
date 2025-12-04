@@ -43,7 +43,6 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV WORKSPACE_PATH=/workspace
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8080
 
 # =============================================================================
 # 系统依赖安装
@@ -117,12 +116,13 @@ RUN source "$NVM_DIR/nvm.sh" \
     && nvm alias default 20 \
     && nvm use default \
     && npm install -g @anthropic-ai/claude-code \
+    && npm install -g @fission-ai/openspec@latest \
     && npm install -g yarn \
     && npm install -g pnpm \
     && nvm install 14 \
     && npm install -g yarn \
     && npm install -g pnpm \
-    && nvm use default \
+    && nvm use default
 
 # 配置 bash 加载 nvm
 RUN echo 'export NVM_DIR="/root/.nvm"' >> /root/.bashrc \
