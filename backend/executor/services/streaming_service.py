@@ -92,29 +92,105 @@ class StreamingAgentService:
         workspace_path: str,
         **kwargs,
     ) -> StreamingSession:
-        """Get existing session or create a new one."""
+        """Get existing session or create a new one.
+        
+        Multi-turn conversation support:
+        - Check if existing client's internal read task is still running
+        - If the read task was cancelled (happens after HTTP response completes),
+          we must create a new client because anyio TaskGroup cannot be restarted
+        - Same session_id maintains conversation history via Claude Code's session_id parameter
+        
+        Note: When FastAPI StreamingResponse completes, the anyio TaskGroup's _read_messages
+        task gets cancelled. Once cancelled, the entire TaskGroup's cancel scope is triggered
+        and cannot be reused. We must create a new client connection.
+        """
         import os
         
+        # Check if session already exists
         if session_id in self._sessions:
             session = self._sessions[session_id]
-            if session.is_connected:
-                logger.info(f"Reusing existing streaming session: {session_id}")
-                return session
+            
+            # Verify the cached client is still valid
+            try:
+                client = session.client
+                client_valid = False
+                need_new_client = False
+                
+                if hasattr(client, '_transport') and client._transport:
+                    transport = client._transport
+                    if hasattr(transport, '_process') and transport._process:
+                        process = transport._process
+                        # Check if process is still running
+                        if hasattr(process, 'returncode'):
+                            if process.returncode is not None:
+                                logger.warning(f"Cached client process terminated (returncode={process.returncode}) for session: {session_id}")
+                                need_new_client = True
+                            else:
+                                # Process is running, but check if read task is alive
+                                if hasattr(client, '_query') and client._query:
+                                    query = client._query
+                                    tasks = query._tg._tasks if hasattr(query._tg, '_tasks') else set()
+                                    if len(tasks) == 0:
+                                        # Read task was cancelled, need new client
+                                        logger.warning(f"Read task was cancelled for session: {session_id}, creating new client")
+                                        need_new_client = True
+                                    else:
+                                        client_valid = True
+                                else:
+                                    client_valid = True
+                        elif hasattr(process, 'poll'):
+                            if process.poll() is not None:
+                                logger.warning(f"Cached client process terminated for session: {session_id}")
+                                need_new_client = True
+                            else:
+                                # Check read task
+                                if hasattr(client, '_query') and client._query:
+                                    query = client._query
+                                    tasks = query._tg._tasks if hasattr(query._tg, '_tasks') else set()
+                                    if len(tasks) == 0:
+                                        logger.warning(f"Read task was cancelled for session: {session_id}, creating new client")
+                                        need_new_client = True
+                                    else:
+                                        client_valid = True
+                                else:
+                                    client_valid = True
+                
+                if client_valid:
+                    logger.info(f"Reusing existing Claude client for session: {session_id}")
+                    session.is_cancelled = False
+                    return session
+                
+                if need_new_client:
+                    # Clean up old client before creating new one
+                    logger.info(f"Cleaning up old client for session: {session_id}")
+                    try:
+                        del self._sessions[session_id]
+                        # Don't disconnect - the process might be in a bad state
+                        # Just let it be garbage collected
+                    except Exception as cleanup_err:
+                        logger.warning(f"Error cleaning up old session: {cleanup_err}")
+                        
+            except Exception as e:
+                logger.warning(f"Error checking client validity for session {session_id}: {e}, creating new client")
+                if session_id in self._sessions:
+                    try:
+                        del self._sessions[session_id]
+                    except Exception:
+                        pass
         
         # Ensure workspace directory exists
         if not os.path.exists(workspace_path):
             os.makedirs(workspace_path, exist_ok=True)
-            logger.info(f"Created workspace directory: {workspace_path}")
         
         # Change to workspace directory before creating client
         try:
             os.chdir(workspace_path)
-            logger.info(f"Changed to workspace directory: {workspace_path}")
         except Exception as e:
             logger.error(f"Failed to change to workspace directory: {e}")
             raise RuntimeError(f"Cannot change to workspace directory: {workspace_path}")
         
         # Create new session
+        logger.info(f"Creating new Claude client for session: {session_id}")
         options = self._create_options(
             workspace_path=workspace_path,
             allowed_tools=kwargs.get("allowed_tools"),
@@ -245,7 +321,6 @@ class StreamingAgentService:
             
             # Send query
             await session.client.query(prompt, session_id=session_id)
-            logger.debug(f"Sent query for session: {session_id}")
             
             # Stream responses
             async for msg in session.client.receive_response():
@@ -263,11 +338,40 @@ class StreamingAgentService:
         except asyncio.CancelledError:
             logger.info(f"Stream cancelled for session: {session_id}")
             yield {"type": "interrupted", "message": "Stream cancelled"}
+            
+            # When stream is cancelled, the client may be in an inconsistent state
+            # (query sent but response not fully received). Clean up the session
+            # to prevent issues on next request.
+            if session_id in self._sessions:
+                logger.info(f"Cleaning up cancelled session: {session_id}")
+                try:
+                    session = self._sessions.pop(session_id)
+                    if session.client:
+                        try:
+                            await session.client.disconnect()
+                        except Exception as disconnect_err:
+                            logger.warning(f"Error disconnecting cancelled session: {disconnect_err}")
+                except Exception as cleanup_err:
+                    logger.warning(f"Error cleaning up cancelled session {session_id}: {cleanup_err}")
+            
             raise
             
         except Exception as e:
             logger.exception(f"Error in streaming execution for session {session_id}")
             yield {"type": "error", "content": str(e)}
+            
+            # Clean up the session on error to prevent reusing a broken session
+            if session_id in self._sessions:
+                logger.info(f"Cleaning up failed session: {session_id}")
+                try:
+                    session = self._sessions.pop(session_id)
+                    if session.client:
+                        try:
+                            await session.client.disconnect()
+                        except Exception as disconnect_err:
+                            logger.warning(f"Error disconnecting failed session: {disconnect_err}")
+                except Exception as cleanup_err:
+                    logger.warning(f"Error cleaning up session {session_id}: {cleanup_err}")
     
     def cancel_task(self, session_id: str) -> bool:
         """
