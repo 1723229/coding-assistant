@@ -130,7 +130,7 @@ class ContainerManager:
             "--label", f"owner={CONTAINER_OWNER}",
             "--label", f"session_id={session_id}",
             # Environment variables
-            "-e", f"PORT={INTERNAL_API_PORT}",  # Internal API port is always 8080
+            # "-e", f"PORT={INTERNAL_API_PORT}",  # Internal API port is always 8080
             "-e", f"TZ={DEFAULT_TIMEZONE}",
             "-e", f"LANG={DEFAULT_LOCALE}",
             "-e", f"SESSION_ID={session_id}",
