@@ -91,6 +91,7 @@ class ServerConfig:
     RELOAD = _server_config.get("reload", True)
     DEBUG = _server_config.get("debug", False)
     CORS_ORIGINS = _server_config.get("cors_origins", ["http://localhost:5173", "http://localhost:3000"])
+    PREVIEW_IP = _server_config.get("preview_ip", "0.0.0.0")
 
     @classmethod
     def get_web_interface_url(cls) -> str:
@@ -197,6 +198,11 @@ class Settings(BaseSettings):
     # GitHub Configuration
     github_token: str = GitHubConfig.TOKEN
     github_default_repo: str = GitHubConfig.DEFAULT_REPO
+
+    # LOCAL_IP
+    server_ip: str = ServerConfig.HOST
+
+    preview_ip: str = ServerConfig.PREVIEW_IP
 
     # Database
     database_url: str = DatabaseConfig.get_async_database_url()

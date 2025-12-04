@@ -4,12 +4,13 @@
 # Server Configuration
 server:
   host: "0.0.0.0"
-  port: 8000
+  port: 8001
   reload: false
   debug: false
   cors_origins:
     - "http://localhost:5173"
     - "http://localhost:3000"
+  preview_ip: 192.168.1.50
 
 # Database Configuration (MySQL)
 database:
