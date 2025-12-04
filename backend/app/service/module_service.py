@@ -881,14 +881,14 @@ class ModuleService:
                 yield f"data: {json.dumps({'type': 'step', 'step': 'load_history', 'status': 'warning', 'message': '未找到历史会话', 'progress': 30}, ensure_ascii=False)}\\n\\n"
 
             # 步骤4: 读取当前spec_content
-            yield f"data: {json.dumps({'type': 'step', 'step': 'read_spec', 'status': 'progress', 'message': '读取当前规格文档...', 'progress': 35}, ensure_ascii=False)}\\n\\n"
+            yield f"data: {json.dumps({'type': 'step', 'step': 'read_spec', 'status': 'progress', 'message': '读取当前spec文档...', 'progress': 35}, ensure_ascii=False)}\\n\\n"
 
-            current_spec = module.spec_content or "无现有规格文档"
+            current_spec = module.spec_content or "无现有spec文档"
 
-            yield f"data: {json.dumps({'type': 'step', 'step': 'read_spec', 'status': 'success', 'message': '规格文档读取完成', 'progress': 40}, ensure_ascii=False)}\\n\\n"
+            yield f"data: {json.dumps({'type': 'step', 'step': 'read_spec', 'status': 'success', 'message': 'spec文档读取完成', 'progress': 40}, ensure_ascii=False)}\\n\\n"
 
             # 步骤5: 生成更新后的spec文档
-            yield f"data: {json.dumps({'type': 'step', 'step': 'update_spec', 'status': 'progress', 'message': '根据优化需求更新规格文档...', 'progress': 45}, ensure_ascii=False)}\\n\\n"
+            yield f"data: {json.dumps({'type': 'step', 'step': 'update_spec', 'status': 'progress', 'message': '根据优化需求更新spec文档...', 'progress': 45}, ensure_ascii=False)}\\n\\n"
 
             try:
                 updated_spec = await self._generate_spec_document(require_content=content, module_code= module.code, module_name= module.name, workspace_path= workspace_path, session_id=session_id )
