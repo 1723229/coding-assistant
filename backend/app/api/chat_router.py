@@ -46,6 +46,7 @@ chat_service = ChatService()
 class ChatRequest(BaseModel):
     """聊天请求模型"""
     content: str
+    task_type: Optional[str] = None  # OpenSpec 任务类型: "spec", "preview", "build"
 
 class SpecGenerationRequest(BaseModel):
     """Spec文档生成请求模型"""
@@ -118,11 +119,18 @@ async def chat_stream_generator(
         session_id: str,
         user_message: str,
         workspace_path: str,
+        task_type: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """
     SSE流式生成器
 
     发送格式: data: {json}\n\n
+    
+    Args:
+        session_id: 会话ID
+        user_message: 用户消息
+        workspace_path: 工作空间路径
+        task_type: OpenSpec 任务类型 ("spec", "preview", "build")
     """
     try:
         # 标记会话为活跃
@@ -141,7 +149,7 @@ async def chat_stream_generator(
             workspace_path=workspace_path,
         )
 
-        logger.info(f"[SSE] Starting chat for session: {session_id}")
+        logger.info(f"[SSE] Starting chat for session: {session_id}, task_type: {task_type}")
 
         # 流式响应
         full_response = []
@@ -149,6 +157,7 @@ async def chat_stream_generator(
             async for chat_msg in sandbox_service.chat_stream(
                     user_message,
                     session_id=session_id,
+                    task_type=task_type,
             ):
                 # 检查会话是否被中断
                 if not active_session_tracker.is_active(session_id):
@@ -211,7 +220,7 @@ async def chat_stream(
         return {"error": f"Database error: {str(e)}"}
 
     return StreamingResponse(
-        chat_stream_generator(session_id, request.content, workspace_path),
+        chat_stream_generator(session_id, request.content, workspace_path, request.task_type),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

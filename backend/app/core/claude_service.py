@@ -109,6 +109,7 @@ class SandboxService:
         prompt: str,
         session_id: Optional[str] = None,
         on_message: Optional[Callable[[ChatMessage], None]] = None,
+        task_type: Optional[str] = None,
     ) -> AsyncIterator[ChatMessage]:
         """Send a message and stream responses from sandbox container.
         
@@ -116,6 +117,7 @@ class SandboxService:
             prompt: User message to send
             session_id: Session ID for multi-turn conversation
             on_message: Optional callback for each message
+            task_type: Optional task type for OpenSpec workflow ("spec", "preview", "build")
             
         Yields:
             ChatMessage objects for each response chunk
@@ -123,12 +125,19 @@ class SandboxService:
         effective_session_id = session_id or self.session_id
         executor = self._get_executor()
         
+        # Build kwargs for executor
+        execute_kwargs = {
+            "session_id": effective_session_id,
+            "workspace_path": self.workspace_path,
+            "prompt": prompt,
+        }
+        
+        # Add task_type if specified (for OpenSpec workflows)
+        if task_type:
+            execute_kwargs["task_type"] = task_type
+        
         try:
-            async for event in executor.execute_stream(
-                session_id=effective_session_id,
-                workspace_path=self.workspace_path,
-                prompt=prompt,
-            ):
+            async for event in executor.execute_stream(**execute_kwargs):
                 chat_msg = self._event_to_chat_message(event)
                 if chat_msg:
                     if on_message:
@@ -178,18 +187,20 @@ class SandboxService:
         self,
         prompt: str,
         session_id: Optional[str] = None,
+        task_type: Optional[str] = None,
     ) -> List[ChatMessage]:
         """Send a message and get all responses (non-streaming).
         
         Args:
             prompt: User message to send
             session_id: Session ID for multi-turn conversation
+            task_type: Optional task type for OpenSpec workflow ("spec", "preview", "build")
             
         Returns:
             List of ChatMessage objects
         """
         messages = []
-        async for msg in self.chat_stream(prompt, session_id=session_id):
+        async for msg in self.chat_stream(prompt, session_id=session_id, task_type=task_type):
             messages.append(msg)
         return messages
     
