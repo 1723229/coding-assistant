@@ -479,6 +479,26 @@ class ModuleService:
                         yield f"data: {json.dumps({'type': 'error', 'message': f'代码拉取失败: {str(e)}'})}\n\n"
                         return
 
+                # 步骤9: 创建沙箱容器
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'progress', 'message': '创建沙箱容器...', 'progress': 95})}\n\n"
+
+                try:
+                    executor = get_sandbox_executor()
+                    container_info = await executor.create_workspace(
+                        session_id=session_id,
+                        workspace_path=workspace_path
+                    )
+                    module_data.update({"container_id": container_info["id"]})
+                    await self.module_repo.update_module(module_id=module_id, data=module_data)
+
+                    container_id_short = container_info["id"][:12]
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'success', 'message': f'容器ID: {container_id_short}', "preview_url": settings.preview_ip + ':' + str(container_info["code_port"]) + data.url, 'progress': 97})}\n\n"
+                except Exception as e:
+                    logger.warning(f"Container creation failed: {e}")
+                    await self.module_repo.delete_module(module_id=module_id)
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'容器创建失败: {str(e)}'})}\n\n"
+                    return
+
                 # 步骤5: 创建数据库记录
                 yield f"data: {json.dumps({'type': 'step', 'step': 'create_db_record', 'status': 'progress', 'message': '创建数据库记录...', 'progress': 60})}\n\n"
 
@@ -557,25 +577,7 @@ class ModuleService:
                         yield f"data: {json.dumps({'type': 'error', 'message': f'文档/代码生成失败: {str(e)}'})}\n\n"
                         return
 
-                # 步骤9: 创建沙箱容器
-                yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'progress', 'message': '创建沙箱容器...', 'progress': 95})}\n\n"
 
-                try:
-                    executor = get_sandbox_executor()
-                    container_info = await executor.create_workspace(
-                        session_id=session_id,
-                        workspace_path=workspace_path
-                    )
-                    module_data.update({"container_id": container_info["id"]})
-                    await self.module_repo.update_module(module_id=module_id, data=module_data)
-
-                    container_id_short = container_info["id"][:12]
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'success', 'message': f'容器ID: {container_id_short}', 'progress': 97})}\n\n"
-                except Exception as e:
-                    logger.warning(f"Container creation failed: {e}")
-                    await self.module_repo.delete_module(module_id=module_id)
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'容器创建失败: {str(e)}'})}\n\n"
-                    return
 
                 # 步骤10: 创建菜单
                 yield f"data: {json.dumps({'type': 'step', 'step': 'create_menu', 'status': 'progress', 'message': '创建系统菜单...', 'progress': 98})}\n\n"
