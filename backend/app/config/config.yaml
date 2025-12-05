@@ -10,7 +10,7 @@ server:
   cors_origins:
     - "http://localhost:5173"
     - "http://localhost:3000"
-  preview_ip: 192.168.1.50
+  preview_ip: http://192.168.1.50
 
 # Database Configuration (MySQL)
 database:
