@@ -23,7 +23,7 @@
 #
 # 构建命令：
 #   cd /path/to/coding-assistant
-#   docker build -f backend/executor/Dockerfile -t coding-assistant-executor:latest .
+#   docker build  --no-cache  -f backend/executor/Dockerfile -t coding-assistant-executor:latest .
 #
 # 环境变量（运行时由 ContainerManager 注入）：
 #   - ANTHROPIC_API_KEY: Claude API 密钥
