@@ -26,6 +26,7 @@ from claude_agent_sdk import (
     ThinkingBlock,
 )
 from executor.config import config
+from executor.services.openspec_prompt_builder import OpenSpecPromptBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -438,3 +439,257 @@ class StreamingAgentService:
         for session_id in session_ids:
             await self.close_session(session_id)
         logger.info(f"Closed {len(session_ids)} streaming sessions")
+
+    async def _execute_single_query(
+            self,
+            session: 'StreamingSession',
+            prompt: str,
+            session_id: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        执行单个查询并流式返回结果
+        
+        Args:
+            session: 流式会话对象
+            prompt: 要执行的提示词
+            session_id: 会话 ID
+            
+        Yields:
+            事件字典
+        """
+        logger.info(f"Executing query for session: {session_id}, prompt: {prompt[:100]}...")
+        await session.client.query(prompt, session_id=session_id)
+        
+        collected_output = []
+        async for msg in session.client.receive_response():
+            if session.is_cancelled:
+                logger.info(f"Stream cancelled for session: {session_id}")
+                yield {"type": "interrupted", "message": "Task cancelled"}
+                break
+            
+            events = self._parse_message(msg)
+            for event in events:
+                # 收集文本和 tool_result 输出用于后续 ID 提取
+                if event.get("type") in ["text", "text_delta", "tool_result"]:
+                    collected_output.append(event.get("content", ""))
+                yield event
+        
+        # 返回收集的输出（用于 ID 提取）
+        yield {"type": "_collected_output", "content": "\n".join(collected_output)}
+
+    async def _extract_spec_id_via_list(
+            self,
+            session: 'StreamingSession',
+            session_id: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        执行 openspec list 系统命令并提取 ID
+        
+        Args:
+            session: 流式会话对象
+            session_id: 会话 ID
+            
+        Yields:
+            事件字典，最后一个事件包含提取的 ID
+        """
+        # 使用 openspec list 系统命令获取 ID
+        list_prompt = OpenSpecPromptBuilder.build_list_prompt()
+        
+        yield {"type": "system", "content": "正在执行 openspec list 获取 ID..."}
+        
+        collected_output = ""
+        async for event in self._execute_single_query(session, list_prompt, session_id):
+            if event.get("type") == "_collected_output":
+                collected_output = event.get("content", "")
+            else:
+                yield event
+        
+        # 从 openspec list 输出中提取 ID
+        spec_id = OpenSpecPromptBuilder.extract_spec_id_from_output(collected_output)
+        
+        if spec_id:
+            logger.info(f"Extracted spec ID: {spec_id} for session: {session_id}")
+            yield {"type": "system", "content": f"提取到 OpenSpec ID: {spec_id}"}
+            yield {"type": "_spec_id", "content": spec_id}
+        else:
+            logger.warning(f"Failed to extract spec ID from output for session: {session_id}")
+            yield {"type": "error", "content": "无法从 openspec list 输出中提取 ID"}
+            yield {"type": "_spec_id", "content": None}
+
+    async def execute_openspec_stream(
+            self,
+            task_data: Dict[str, Any],
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        根据 task_type 执行 OpenSpec 任务流程
+        
+        支持三种任务类型:
+        - spec: 执行 proposal → 提取 ID → 自动执行 preview
+        - preview: 提取 ID → 执行 preview + prompt
+        - build: 提取 ID → 执行 apply → 执行 archive
+        
+        Args:
+            task_data: 任务数据，包含 session_id, workspace_path, prompt, task_type 等
+            
+        Yields:
+            事件字典用于 SSE 流式传输
+        """
+        session_id = task_data.get("session_id", "")
+        workspace_path = task_data.get("workspace_path", "/workspace")
+        user_prompt = task_data.get("prompt", "")
+        task_type = task_data.get("task_type", "")
+        
+        try:
+            # 获取或创建会话
+            session = await self._get_or_create_session(
+                session_id=session_id,
+                workspace_path=workspace_path,
+                allowed_tools=task_data.get("allowed_tools"),
+                permission_mode=task_data.get("permission_mode"),
+                system_prompt=task_data.get("system_prompt"),
+                model=task_data.get("model"),
+            )
+            
+            if task_type == "spec":
+                # === SPEC 流程 ===
+                # 步骤1: 执行 proposal
+                yield {"type": "system", "content": "=== 开始执行 spec 流程 ==="}
+                yield {"type": "system", "content": "步骤 1/3: 执行 proposal..."}
+                
+                proposal_prompt = OpenSpecPromptBuilder.build_proposal_prompt(user_prompt)
+                async for event in self._execute_single_query(session, proposal_prompt, session_id):
+                    if event.get("type") != "_collected_output":
+                        yield event
+                
+                # 步骤2: 执行 openspec list 提取 ID
+                yield {"type": "system", "content": "步骤 2/3: 获取 OpenSpec ID..."}
+                
+                spec_id = None
+                async for event in self._extract_spec_id_via_list(session, session_id):
+                    if event.get("type") == "_spec_id":
+                        spec_id = event.get("content")
+                    elif event.get("type") != "_collected_output":
+                        yield event
+                
+                if not spec_id:
+                    yield {"type": "error", "content": "无法获取 OpenSpec ID，流程终止"}
+                    return
+                
+                # 返回提取的 ID
+                yield {"type": "spec_id", "content": spec_id}
+                
+                # 步骤3: 自动执行 preview
+                yield {"type": "system", "content": f"步骤 3/3: 执行 preview (ID: {spec_id})..."}
+                
+                preview_prompt = OpenSpecPromptBuilder.build_preview_prompt(spec_id)
+                async for event in self._execute_single_query(session, preview_prompt, session_id):
+                    if event.get("type") != "_collected_output":
+                        yield event
+                
+                yield {"type": "system", "content": "=== spec 流程完成 ==="}
+                
+            elif task_type == "preview":
+                # === PREVIEW 流程 ===
+                yield {"type": "system", "content": "=== 开始执行 preview 流程 ==="}
+                
+                # 步骤1: 执行 openspec list 提取 ID
+                yield {"type": "system", "content": "步骤 1/2: 获取 OpenSpec ID..."}
+                
+                spec_id = None
+                async for event in self._extract_spec_id_via_list(session, session_id):
+                    if event.get("type") == "_spec_id":
+                        spec_id = event.get("content")
+                    elif event.get("type") != "_collected_output":
+                        yield event
+                
+                if not spec_id:
+                    yield {"type": "error", "content": "无法获取 OpenSpec ID，流程终止"}
+                    return
+                
+                # 返回提取的 ID
+                yield {"type": "spec_id", "content": spec_id}
+                
+                # 步骤2: 执行 preview + prompt
+                yield {"type": "system", "content": f"步骤 2/2: 执行 preview (ID: {spec_id})..."}
+                
+                preview_prompt = OpenSpecPromptBuilder.build_preview_prompt(spec_id, user_prompt)
+                async for event in self._execute_single_query(session, preview_prompt, session_id):
+                    if event.get("type") != "_collected_output":
+                        yield event
+                
+                yield {"type": "system", "content": "=== preview 流程完成 ==="}
+                
+            elif task_type == "build":
+                # === BUILD 流程 ===
+                yield {"type": "system", "content": "=== 开始执行 build 流程 ==="}
+                
+                # 步骤1: 执行 openspec list 提取 ID
+                yield {"type": "system", "content": "步骤 1/3: 获取 OpenSpec ID..."}
+                
+                spec_id = None
+                async for event in self._extract_spec_id_via_list(session, session_id):
+                    if event.get("type") == "_spec_id":
+                        spec_id = event.get("content")
+                    elif event.get("type") != "_collected_output":
+                        yield event
+                
+                if not spec_id:
+                    yield {"type": "error", "content": "无法获取 OpenSpec ID，流程终止"}
+                    return
+                
+                # 返回提取的 ID
+                yield {"type": "spec_id", "content": spec_id}
+                
+                # 步骤2: 执行 apply
+                yield {"type": "system", "content": f"步骤 2/3: 执行 apply (ID: {spec_id})..."}
+                
+                apply_prompt = OpenSpecPromptBuilder.build_apply_prompt(spec_id)
+                async for event in self._execute_single_query(session, apply_prompt, session_id):
+                    if event.get("type") != "_collected_output":
+                        yield event
+                
+                # 步骤3: 执行 archive
+                yield {"type": "system", "content": "步骤 3/3: 执行 archive..."}
+                
+                archive_prompt = OpenSpecPromptBuilder.build_archive_prompt()
+                async for event in self._execute_single_query(session, archive_prompt, session_id):
+                    if event.get("type") != "_collected_output":
+                        yield event
+                
+                yield {"type": "system", "content": "=== build 流程完成 ==="}
+                
+            else:
+                yield {"type": "error", "content": f"未知的 task_type: {task_type}"}
+                
+        except asyncio.CancelledError:
+            logger.info(f"OpenSpec stream cancelled for session: {session_id}")
+            yield {"type": "interrupted", "message": "Stream cancelled"}
+            
+            if session_id in self._sessions:
+                logger.info(f"Cleaning up cancelled session: {session_id}")
+                try:
+                    session = self._sessions.pop(session_id)
+                    if session.client:
+                        try:
+                            await session.client.disconnect()
+                        except Exception as disconnect_err:
+                            logger.warning(f"Error disconnecting cancelled session: {disconnect_err}")
+                except Exception as cleanup_err:
+                    logger.warning(f"Error cleaning up cancelled session {session_id}: {cleanup_err}")
+            raise
+            
+        except Exception as e:
+            logger.exception(f"Error in OpenSpec streaming execution for session {session_id}")
+            yield {"type": "error", "content": str(e)}
+            
+            if session_id in self._sessions:
+                logger.info(f"Cleaning up failed session: {session_id}")
+                try:
+                    session = self._sessions.pop(session_id)
+                    if session.client:
+                        try:
+                            await session.client.disconnect()
+                        except Exception as disconnect_err:
+                            logger.warning(f"Error disconnecting failed session: {disconnect_err}")
+                except Exception as cleanup_err:
+                    logger.warning(f"Error cleaning up session {session_id}: {cleanup_err}")
