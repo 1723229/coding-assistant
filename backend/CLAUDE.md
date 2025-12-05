@@ -76,6 +76,54 @@ The application follows a clean layered architecture pattern:
 4. **Repository Layer** (`app/db/repository/`) - Database access abstraction
 5. **Models & Schemas** (`app/db/models/`, `app/db/schemas/`) - Data structures
 
+### Sandbox Executor Architecture
+
+The application uses a dual-execution model:
+
+- **SessionClaudeManager** (`app/core/claude_service.py:408`) - Legacy direct execution, manages Claude SDK instances for simple chat sessions
+- **SandboxExecutor** (`app/core/executor.py`) - Production execution mode that runs all Claude operations in isolated Docker containers
+
+Each sandbox container:
+- Runs the `coding-assistant-executor` Docker image (built from `backend/executor/Dockerfile`)
+- Has its own isolated workspace mounted as a volume
+- Exposes two ports: API port (10001-10100 range) and Code service port (20001-20100 range)
+- Has resource limits (4GB memory, 2 CPUs by default)
+- Communicates back to host via `host.docker.internal` (Mac/Windows) or host IP (Linux)
+
+The executor handles:
+- Container lifecycle (create, start, stop, restart, health checks)
+- Port allocation from configured ranges
+- Workspace volume mounting
+- Session timeout cleanup (30 minutes default)
+- Streaming and non-streaming chat requests proxied to containers
+
+### Project/Module/Version Hierarchy
+
+The application manages a three-level hierarchy:
+
+1. **Projects** (`app/db/models/project.py`) - Top-level container with codebase URL, GitHub token, branch
+2. **Modules** (`app/db/models/module.py`) - Two types:
+   - **NODE** - Organizational nodes for tree structure, URL shared with children
+   - **POINT** - Leaf nodes that create actual workspaces, sessions, and containers
+3. **Versions** (`app/db/models/version.py`) - Track commits for each module's code changes
+
+POINT module creation flow (`app/service/module_service.py:169`):
+1. Generate session_id and workspace_path
+2. Clone GitHub repository to workspace
+3. Create feature branch (`{branch}-{session_id}`)
+4. Generate technical spec document using Claude
+5. Generate code from spec and create initial commit
+6. Create version record
+7. Create sandbox container
+8. Insert menu entry into `sys_module` table (direct MySQL access)
+
+### Dual Database Access Pattern
+
+Most data access uses SQLAlchemy repositories, but some services use direct MySQL connections:
+- `ModuleService` uses `MySQLUtil` for `sys_module` table operations (`app/service/module_service.py:50`)
+- This table exists in a separate "framework" database for UI menu integration
+- Always use `MySQLUtil` for `sys_module`, repositories for all other tables
+
 ### Multi-Turn Conversation System
 
 The application maintains conversation context across multiple exchanges using `ClaudeSDKClient` with session IDs:
@@ -103,11 +151,17 @@ Uses SQLAlchemy async with MySQL:
 
 YAML-based configuration (`app/config/config.yaml`) with class-based access:
 - `DatabaseConfig` - Connection pooling, timeouts
-- `ServerConfig` - Host, port, CORS, debug settings
-- `ClaudeConfig` - API key, model, tools, permission mode, session timeout
+- `ServerConfig` - Host, port, CORS, debug settings, preview_ip for container URLs
 - `WorkspaceConfig` - Base path for isolated workspaces
 - `GitHubConfig` - Token and default repo
-- `DockerConfig` - Container settings
+- `DockerConfig` - Legacy container settings (not actively used)
+- `ExecutorConfig` - **Primary configuration** for sandbox containers:
+  - Docker image name (`coding-assistant-executor:latest`)
+  - Port ranges for API (10001-10100) and Code service (20001-20100)
+  - Timeouts (request: 300s, stream: 600s, health check: 30s)
+  - Resource limits (memory: 4g, CPU: 2 cores)
+  - Claude API credentials passed to containers (key, base_url, model)
+  - Docker host address for container-to-host communication
 
 Configuration classes are immutable and loaded once at startup from `app/config/settings.py`.
 
