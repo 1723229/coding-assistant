@@ -10,7 +10,7 @@ server:
   cors_origins:
     - "http://localhost:5173"
     - "http://localhost:3000"
-  preview_ip: dev.agentworld.cn
+  preview_ip: http://dev.agentworld.cn
 
 # Database Configuration (MySQL)
 database:
@@ -52,7 +52,7 @@ executor:
   # Port range for code service
   code_port_range_min: 20001
   code_port_range_max: 20100
-  
+
   # Timeouts in seconds
   request_timeout: 300      # Sync request timeout
   stream_timeout: 600       # SSE stream timeout
