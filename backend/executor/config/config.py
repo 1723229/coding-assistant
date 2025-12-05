@@ -14,9 +14,9 @@ WORKSPACE_ROOT = os.environ.get("WORKSPACE_ROOT", "/workspace/")
 PORT = int(os.environ.get("PORT", "8080"))
 
 # Claude SDK configuration
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "sk-e43189bfbcc24a01bab723f9ebb38e81")
-ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "https://dashscope.aliyuncs.com/apps/anthropic")
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "qwen3-coder-plus")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL")
 
 # Permission mode for Claude Code
 PERMISSION_MODE = os.environ.get("PERMISSION_MODE", "bypassPermissions")

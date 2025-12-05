@@ -587,6 +587,7 @@ class StreamingAgentService:
                         yield event
                 
                 yield {"type": "system", "content": "=== spec 流程完成 ==="}
+                yield {"type": "complete", "content": "spec 流程执行完成", "spec_id": spec_id}
                 
             elif task_type == "preview":
                 # === PREVIEW 流程 ===
@@ -618,6 +619,7 @@ class StreamingAgentService:
                         yield event
                 
                 yield {"type": "system", "content": "=== preview 流程完成 ==="}
+                yield {"type": "complete", "content": "preview 流程执行完成", "spec_id": spec_id}
                 
             elif task_type == "build":
                 # === BUILD 流程 ===
@@ -657,6 +659,7 @@ class StreamingAgentService:
                         yield event
                 
                 yield {"type": "system", "content": "=== build 流程完成 ==="}
+                yield {"type": "complete", "content": "build 流程执行完成", "spec_id": spec_id}
                 
             else:
                 yield {"type": "error", "content": f"未知的 task_type: {task_type}"}

@@ -280,11 +280,13 @@ class ModuleService:
                             # 6. Generate code from spec and commit
                             logger.info(f"Generating code from spec for module: {module_id}")
                             commit_id = await generate_code_from_spec(
-                                spec_content=spec_dict.get("spec_content"),
+                                spec_content=data.require_content,
                                 workspace_path=workspace_path,
                                 session_id=session_id,
                                 module_code=data.code,
-                                module_name=data.name
+                                module_name=data.name,
+                                module_url=data.url,
+                                task_type="spec"
                             )
 
                             if commit_id:
@@ -492,7 +494,7 @@ class ModuleService:
                     await self.module_repo.update_module(module_id=module_id, data=module_data)
 
                     container_id_short = container_info["id"][:12]
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'success', 'message': f'容器ID: {container_id_short}', "preview_url": settings.preview_ip + ':' + str(container_info["code_port"]) + data.url, 'progress': 97})}\n\n"
+                    yield f'data: {json.dumps({"type": "step", "step": "create_container", "status": "success", "message": f"容器ID: {container_id_short}", "preview_url": settings.preview_ip + ":" + str(container_info["code_port"]) + data.url, "progress": 97})}\n\n'
                 except Exception as e:
                     logger.warning(f"Container creation failed: {e}")
                     await self.module_repo.delete_module(module_id=module_id)
@@ -534,11 +536,13 @@ class ModuleService:
                             yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'progress', 'message': '正在根据Spec生成代码...', 'progress': 80})}\n\n"
 
                             commit_id = await generate_code_from_spec(
-                                spec_content=spec_dict.get("spec_content"),
+                                spec_content=data.require_content,
                                 workspace_path=workspace_path,
                                 session_id=session_id,
                                 module_code=data.code,
-                                module_name=data.name
+                                module_name=data.name,
+                                module_url=data.url,
+                                task_type="spec"
                             )
 
                             if commit_id:
@@ -924,11 +928,13 @@ class ModuleService:
 
             try:
                 commit_id = await generate_code_from_spec(
-                    spec_content=updated_spec,
+                    spec_content=content,
                     workspace_path=workspace_path,
                     session_id=session_id,
                     module_code=module.code,
-                    module_name=module.name
+                    module_name=module.name,
+                    module_url=module.url or "",
+                    task_type="preview"
                 )
 
                 if not commit_id:
