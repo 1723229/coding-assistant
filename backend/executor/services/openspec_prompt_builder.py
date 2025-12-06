@@ -131,19 +131,13 @@ class OpenSpecPromptBuilder:
     @classmethod
     def extract_spec_id_from_output(cls, output: str) -> Optional[str]:
         """
-        从 openspec list 命令输出中提取最新的 ID
+        从输出中提取 OpenSpec ID
         
-        支持的输出格式:
-        1. openspec list 输出格式:
-           Changes:
-               add-snake-game-to-problem-management     No tasks
-           或
-           Changes:
-               add-snake-game-module      0/27 tasks
-        2. ID: xxx 或 id: xxx 格式
+        OpenSpec ID 格式: 以 add- 开头，用连字符连接的字符串
+        例如: add-user-registration-test16, add-snake-game-module
         
         Args:
-            output: openspec list 命令的输出文本
+            output: 命令输出文本
             
         Returns:
             提取到的 ID，如果未找到则返回 None
@@ -152,46 +146,18 @@ class OpenSpecPromptBuilder:
             logger.warning("Empty output provided for ID extraction")
             return None
         
-        # 检查是否没有 changes
         if "No active changes found" in output:
             logger.warning("No active changes found in openspec list output")
             return None
         
-        # 格式1: openspec list 输出格式
-        # Changes:
-        #     add-snake-game-to-problem-management     No tasks
-        # 或
-        #     add-snake-game-module      0/27 tasks
-        # 匹配 Changes: 后面缩进的行，提取第一个单词（ID）
-        openspec_list_pattern = r'Changes:\s*\n\s+([a-zA-Z][a-zA-Z0-9_-]*(?:-[a-zA-Z0-9_]+)+)'
-        openspec_matches = re.findall(openspec_list_pattern, output)
+        # 匹配: xxx-xxx 后面跟 tasks (openspec list 输出格式)
+        pattern = r'([a-zA-Z0-9]+-[a-zA-Z0-9-]+)\s+(?:\d+/\d+\s+tasks|No\s+tasks)'
+        matches = re.findall(pattern, output)
         
-        if openspec_matches:
-            spec_id = openspec_matches[0]
-            logger.info(f"Extracted spec ID from openspec list format: {spec_id}")
+        if matches:
+            spec_id = matches[0]
+            logger.info(f"Extracted spec ID: {spec_id}")
             return spec_id
-        
-        # 格式2: 匹配行首的 ID（带 tasks 计数或 No tasks）
-        # add-snake-game-module      0/27 tasks
-        # add-snake-game-to-problem-management     No tasks
-        tasks_pattern = r'^\s+([a-zA-Z][a-zA-Z0-9_-]*(?:-[a-zA-Z0-9_]+)+)\s+(?:\d+/\d+\s+tasks|No\s+tasks)'
-        tasks_matches = re.findall(tasks_pattern, output, re.MULTILINE)
-        
-        if tasks_matches:
-            spec_id = tasks_matches[0]
-            logger.info(f"Extracted spec ID from tasks pattern: {spec_id}")
-            return spec_id
-        
-        # 格式3: ID: xxx 或 id: xxx
-        id_pattern = r'(?:ID|id|Id):\s*([a-zA-Z][a-zA-Z0-9_-]*(?:-[a-zA-Z0-9_]+)+)'
-        id_matches = re.findall(id_pattern, output)
-        
-        if id_matches:
-            spec_id = id_matches[0]
-            logger.info(f"Extracted spec ID from 'ID:' pattern: {spec_id}")
-            return spec_id
-        
-        # 不再使用宽泛的连字符匹配，避免匹配到 org-xxx 等非 ID 字符串
         
         logger.warning(f"Failed to extract spec ID from output (length={len(output)})")
         return None

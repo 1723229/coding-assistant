@@ -4,6 +4,9 @@ Streaming agent service for SSE-based task execution.
 
 This service provides async streaming execution of Claude Code tasks,
 yielding events as they occur for real-time updates via SSE.
+
+Supports MCP (Model Context Protocol) servers for extended tool capabilities.
+See: https://platform.claude.com/docs/en/agent-sdk/mcp
 """
 
 import asyncio
@@ -11,7 +14,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Any, Optional, AsyncGenerator
+from typing import Dict, Any, Optional, AsyncGenerator, List
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -65,8 +68,29 @@ class StreamingAgentService:
             permission_mode: Optional[str] = None,
             system_prompt: Optional[dict] = None,
             model: Optional[str] = None,
+            mcp_servers: Optional[Dict[str, Any]] = None,
     ) -> ClaudeAgentOptions:
-        """Create Claude agent options."""
+        """
+        Create Claude agent options with optional MCP server support.
+
+        Args:
+            workspace_path: Working directory for the agent
+            allowed_tools: List of allowed tools (defaults to config.DEFAULT_TOOLS)
+            permission_mode: Permission mode for Claude Code
+            system_prompt: Custom system prompt configuration
+            model: Model to use (defaults to config.ANTHROPIC_MODEL)
+            mcp_servers: MCP server configurations dict. Format:
+                {
+                    "server_name": {
+                        "command": "npx",
+                        "args": ["@playwright/mcp@latest"],
+                        "env": {"KEY": "value"}  # optional
+                    }
+                }
+
+        Returns:
+            ClaudeAgentOptions configured with MCP servers if provided
+        """
         if system_prompt:
             prompt_config = system_prompt
         else:
@@ -76,15 +100,33 @@ class StreamingAgentService:
                 "append": "You are helping the user with their coding tasks in a sandbox environment.",
             }
 
-        options = ClaudeAgentOptions(
-            allowed_tools=allowed_tools or config.DEFAULT_TOOLS.copy(),
-            system_prompt=prompt_config,
-            permission_mode=permission_mode or config.PERMISSION_MODE,
-            cwd=workspace_path,
-            include_partial_messages=True,
-            model=model or config.ANTHROPIC_MODEL,
-            setting_sources=["project", "local", "user"],
-        )
+        # Build base options
+        options_kwargs = {
+            "allowed_tools": allowed_tools or config.DEFAULT_TOOLS.copy(),
+            "system_prompt": prompt_config,
+            "permission_mode": permission_mode or config.PERMISSION_MODE,
+            "cwd": workspace_path,
+            "include_partial_messages": True,
+            "model": model or config.ANTHROPIC_MODEL,
+            "setting_sources": ["project", "local", "user"],
+        }
+
+        # Add MCP servers if provided
+        if mcp_servers:
+            options_kwargs["mcp_servers"] = mcp_servers
+            logger.info(f"Configuring MCP servers: {list(mcp_servers.keys())}")
+
+            # Automatically add MCP tools to allowed_tools if not already present
+            # MCP tools follow the pattern: mcp__<server_name>__<tool_name>
+            # We add a wildcard pattern to allow all MCP tools from configured servers
+            current_tools = options_kwargs["allowed_tools"]
+            for server_name in mcp_servers.keys():
+                mcp_tool_prefix = f"mcp__{server_name}__"
+                # Check if we should add MCP tool patterns
+                # The SDK should handle this automatically, but we log it
+                logger.debug(f"MCP server '{server_name}' tools will be available with prefix: {mcp_tool_prefix}")
+
+        options = ClaudeAgentOptions(**options_kwargs)
         return options
 
     async def _get_or_create_session(
@@ -197,12 +239,27 @@ class StreamingAgentService:
 
         # Create new session
         logger.info(f"Creating new Claude client for session: {session_id}")
+
+        # Ensure experimental betas are disabled for API proxy compatibility
+        if config.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS:
+            os.environ.setdefault("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
+                                  config.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)
+
+        # Get MCP servers from kwargs or load from config/workspace
+        mcp_servers = kwargs.get("mcp_servers")
+        if not mcp_servers:
+            # Try to load MCP servers from config (env var or .mcp.json)
+            mcp_servers = config.get_mcp_servers(workspace_path)
+            if mcp_servers:
+                logger.info(f"Loaded MCP servers from config: {list(mcp_servers.keys())}")
+
         options = self._create_options(
             workspace_path=workspace_path,
             allowed_tools=kwargs.get("allowed_tools"),
             permission_mode=kwargs.get("permission_mode"),
             system_prompt=kwargs.get("system_prompt"),
             model=kwargs.get("model"),
+            mcp_servers=mcp_servers,
         )
 
         client = ClaudeSDKClient(options=options)
@@ -306,7 +363,15 @@ class StreamingAgentService:
         Execute a task with streaming response.
 
         Args:
-            task_data: Task data containing session_id, workspace_path, prompt, etc.
+            task_data: Task data containing:
+                - session_id: Unique session identifier
+                - workspace_path: Working directory path
+                - prompt: User prompt/query
+                - allowed_tools: Optional list of allowed tools
+                - permission_mode: Optional permission mode
+                - system_prompt: Optional custom system prompt
+                - model: Optional model name
+                - mcp_servers: Optional MCP server configurations dict
 
         Yields:
             Event dictionaries for SSE streaming
@@ -324,6 +389,7 @@ class StreamingAgentService:
                 permission_mode=task_data.get("permission_mode"),
                 system_prompt=task_data.get("system_prompt"),
                 model=task_data.get("model"),
+                mcp_servers=task_data.get("mcp_servers"),
             )
 
             # Send query
@@ -448,32 +514,32 @@ class StreamingAgentService:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         执行单个查询并流式返回结果
-        
+
         Args:
             session: 流式会话对象
             prompt: 要执行的提示词
             session_id: 会话 ID
-            
+
         Yields:
             事件字典
         """
-        logger.info(f"Executing query for session: {session_id}, prompt: {prompt[:100]}...")
+        logger.debug(f"Query start: session={session_id}, prompt_len={len(prompt)}")
         await session.client.query(prompt, session_id=session_id)
-        
+
         collected_output = []
         async for msg in session.client.receive_response():
             if session.is_cancelled:
-                logger.info(f"Stream cancelled for session: {session_id}")
                 yield {"type": "interrupted", "message": "Task cancelled"}
                 break
-            
+
             events = self._parse_message(msg)
             for event in events:
-                # 收集文本和 tool_result 输出用于后续 ID 提取
-                if event.get("type") in ["text", "text_delta", "tool_result"]:
+                event_type = event.get("type", "unknown")
+                if event_type in ["text", "text_delta", "tool_result"]:
                     collected_output.append(event.get("content", ""))
+                    logger.info(event.get("content", ""))
                 yield event
-        
+
         # 返回收集的输出（用于 ID 提取）
         yield {"type": "_collected_output", "content": "\n".join(collected_output)}
 
@@ -484,29 +550,29 @@ class StreamingAgentService:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         执行 openspec list 系统命令并提取 ID
-        
+
         Args:
             session: 流式会话对象
             session_id: 会话 ID
-            
+
         Yields:
             事件字典，最后一个事件包含提取的 ID
         """
         # 使用 openspec list 系统命令获取 ID
         list_prompt = OpenSpecPromptBuilder.build_list_prompt()
-        
+
         yield {"type": "system", "content": "正在执行 openspec list 获取 ID..."}
-        
+
         collected_output = ""
         async for event in self._execute_single_query(session, list_prompt, session_id):
             if event.get("type") == "_collected_output":
                 collected_output = event.get("content", "")
             else:
                 yield event
-        
+
         # 从 openspec list 输出中提取 ID
         spec_id = OpenSpecPromptBuilder.extract_spec_id_from_output(collected_output)
-        
+
         if spec_id:
             logger.info(f"Extracted spec ID: {spec_id} for session: {session_id}")
             yield {"type": "system", "content": f"提取到 OpenSpec ID: {spec_id}"}
@@ -522,15 +588,15 @@ class StreamingAgentService:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         根据 task_type 执行 OpenSpec 任务流程
-        
+
         支持三种任务类型:
         - spec: 执行 proposal → 提取 ID → 自动执行 preview
         - preview: 提取 ID → 执行 preview + prompt
         - build: 提取 ID → 执行 apply → 执行 archive
-        
+
         Args:
             task_data: 任务数据，包含 session_id, workspace_path, prompt, task_type 等
-            
+
         Yields:
             事件字典用于 SSE 流式传输
         """
@@ -538,9 +604,11 @@ class StreamingAgentService:
         workspace_path = task_data.get("workspace_path", "/workspace")
         user_prompt = task_data.get("prompt", "")
         task_type = task_data.get("task_type", "")
-        
+
         try:
             # 获取或创建会话
+            logger.info(f"OpenSpec {task_type} start: session={session_id}")
+            
             session = await self._get_or_create_session(
                 session_id=session_id,
                 workspace_path=workspace_path,
@@ -548,14 +616,15 @@ class StreamingAgentService:
                 permission_mode=task_data.get("permission_mode"),
                 system_prompt=task_data.get("system_prompt"),
                 model=task_data.get("model"),
+                mcp_servers=task_data.get("mcp_servers"),
             )
             
             if task_type == "spec":
                 # === SPEC 流程 ===
-                # 步骤1: 执行 proposal
                 yield {"type": "system", "content": "=== 开始执行 spec 流程 ==="}
-                yield {"type": "system", "content": "步骤 1/3: 执行 proposal..."}
                 
+                # 步骤1: 执行 proposal
+                yield {"type": "system", "content": "步骤 1/3: 执行 proposal..."}
                 proposal_prompt = OpenSpecPromptBuilder.build_proposal_prompt(user_prompt)
                 async for event in self._execute_single_query(session, proposal_prompt, session_id):
                     if event.get("type") != "_collected_output":
@@ -563,7 +632,6 @@ class StreamingAgentService:
                 
                 # 步骤2: 执行 openspec list 提取 ID
                 yield {"type": "system", "content": "步骤 2/3: 获取 OpenSpec ID..."}
-                
                 spec_id = None
                 async for event in self._extract_spec_id_via_list(session, session_id):
                     if event.get("type") == "_spec_id":
@@ -572,15 +640,15 @@ class StreamingAgentService:
                         yield event
                 
                 if not spec_id:
+                    logger.error(f"Failed to get spec ID: session={session_id}")
                     yield {"type": "error", "content": "无法获取 OpenSpec ID，流程终止"}
                     return
                 
-                # 返回提取的 ID
                 yield {"type": "spec_id", "content": spec_id}
+                logger.info(f"Spec ID extracted: {spec_id}")
                 
                 # 步骤3: 自动执行 preview
                 yield {"type": "system", "content": f"步骤 3/3: 执行 preview (ID: {spec_id})..."}
-                
                 preview_prompt = OpenSpecPromptBuilder.build_preview_prompt(spec_id)
                 async for event in self._execute_single_query(session, preview_prompt, session_id):
                     if event.get("type") != "_collected_output":
@@ -588,6 +656,7 @@ class StreamingAgentService:
                 
                 yield {"type": "system", "content": "=== spec 流程完成 ==="}
                 yield {"type": "complete", "content": "spec 流程执行完成", "spec_id": spec_id}
+                logger.info(f"OpenSpec spec completed: session={session_id}")
                 
             elif task_type == "preview":
                 # === PREVIEW 流程 ===

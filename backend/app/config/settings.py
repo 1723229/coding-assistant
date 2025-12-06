@@ -165,7 +165,7 @@ class ExecutorConfig:
     
     # Timeouts in seconds
     REQUEST_TIMEOUT = _executor_config.get("request_timeout", 300)
-    STREAM_TIMEOUT = _executor_config.get("stream_timeout", 600)
+    STREAM_TIMEOUT = _executor_config.get("stream_timeout", 6000)
     HEALTH_CHECK_TIMEOUT = _executor_config.get("health_check_timeout", 30)
     
     # Container resource limits

@@ -1,7 +1,8 @@
 import logging
-from typing import Optional
+from typing import Optional, Tuple
 
 from app.core.claude_service import session_manager, MessageType
+from app.core.openspec_reader import get_proposal_content_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ async def generate_code_from_spec(
         module_code: str,
         module_url: str,
         task_type: str
-) -> Optional[str]:
+) -> Tuple[Optional[str], Optional[str]]:
     """
     使用 Claude 根据规格文档生成代码并commit
 
@@ -26,16 +27,19 @@ async def generate_code_from_spec(
         module_code: 模块代码
 
     Returns:
-        commit_id，失败返回 None
+        Tuple[commit_id, proposal_content]，失败返回 (None, None)
     """
+    spec_id = None
+    proposal_content = None
+    
     try:
         logger.info(f"Generating code from spec for module: {module_code}")
         # 构建提示词
 
         if task_type == "spec":
-            prompt = f"<Module Info>\n name: {module_name}，english name: {module_code},Module URL:{module_url}\n <User's Proposal>\n  {spec_content}"
+            prompt = f"<Module Info>\n name: {module_name}，english name: {module_code},Module URL:{module_url}\n <User's Proposal>\n  {spec_content} \n - 强调：不允许反问我，不需要澄清，直接执行"
         elif task_type == "preview":
-            prompt= f"<User's review>\n {spec_content}"
+            prompt= f"<User's review>\n {spec_content} \n - 强调：不允许反问我，不需要澄清，直接执行"
         else:
             prompt = spec_content
 
@@ -57,12 +61,26 @@ async def generate_code_from_spec(
             # 记录重要的消息类型
             if msg.type in [MessageType.TOOL_USE.value, MessageType.ERROR.value]:
                 logger.info(f"Claude message: {msg.type} - {msg.content[:200]}")
+            
+            # 捕获 spec_id 消息，提取 spec_id 并读取 proposal.md
+            # 注意: executor 内部使用 "_spec_id"，但对外暴露的是 "spec_id" (无下划线)
+            if msg.type == "spec_id" and msg.content:
+                spec_id = msg.content
+                logger.info(f"Extracted spec_id: {spec_id}, reading proposal.md...")
+                proposal_content = get_proposal_content_by_id(
+                    workspace_path=workspace_path,
+                    spec_id=spec_id
+                )
+                if proposal_content:
+                    logger.info(f"Successfully read proposal.md for spec_id: {spec_id}, length: {len(proposal_content)}")
+                else:
+                    logger.warning(f"Failed to read proposal.md for spec_id: {spec_id}")
 
         # 检查是否成功
         has_error = any(msg.type == MessageType.ERROR.value for msg in all_messages)
         if has_error:
             logger.error("Claude encountered errors during code generation")
-            return None
+            return None, proposal_content
 
         logger.info("Code generation completed, now committing changes...")
 
@@ -86,18 +104,18 @@ async def generate_code_from_spec(
                 commit_id = commit.hexsha[:12]  # 使用前12位
 
                 logger.info(f"Code committed successfully: {commit_id}")
-                return commit_id
+                return commit_id, proposal_content
             else:
                 logger.warning("No changes to commit")
-                return None
+                return None, proposal_content
 
         except Exception as e:
             logger.error(f"Failed to commit code: {e}", exc_info=True)
-            return None
+            return None, proposal_content
 
     except Exception as e:
         logger.error(f"Failed to generate code from spec: {e}", exc_info=True)
-        return None
+        return None, proposal_content
 
 
 class PromptBuild:

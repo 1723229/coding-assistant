@@ -99,6 +99,7 @@ class OpenSpecReader:
     ARCHIVE_DIR = "archive"
     SPECS_DIR = "specs"
     SPEC_FILE = "spec.md"
+    PROPOSAL_FILE = "proposal.md"
     
     # 忽略的目录
     IGNORED_DIRS = {"archive", "dummy", ".git", "__pycache__"}
@@ -296,6 +297,38 @@ class OpenSpecReader:
             # 返回所有内容合并
             return spec_info.all_content
     
+    def read_proposal(self, spec_id: str) -> Optional[str]:
+        """
+        读取 proposal.md 内容
+        
+        Args:
+            spec_id: OpenSpec ID
+            
+        Returns:
+            proposal.md 内容字符串，如果不存在则返回 None
+            
+        路径: /workspace/openspec/changes/{spec_id}/proposal.md
+        """
+        spec_dir, is_archived = self._find_spec_dir(spec_id)
+        if not spec_dir:
+            logger.warning(f"OpenSpec '{spec_id}' not found for proposal")
+            return None
+        
+        proposal_file = os.path.join(spec_dir, self.PROPOSAL_FILE)
+        
+        if not os.path.exists(proposal_file):
+            logger.warning(f"proposal.md not found: {proposal_file}")
+            return None
+        
+        try:
+            with open(proposal_file, "r", encoding="utf-8") as f:
+                content = f.read()
+                logger.info(f"Successfully read proposal.md for spec '{spec_id}', length: {len(content)}")
+                return content
+        except Exception as e:
+            logger.error(f"Failed to read proposal.md for spec '{spec_id}': {e}")
+            return None
+    
     def get_spec_summary(self, spec_id: str) -> Optional[Dict[str, Any]]:
         """
         获取规格摘要信息（不读取完整内容）
@@ -345,6 +378,32 @@ def get_spec_content_by_id(
     """
     reader = OpenSpecReader(workspace_path)
     return reader.read_spec_content(spec_id, component)
+
+
+def get_proposal_content_by_id(
+    workspace_path: str,
+    spec_id: str,
+) -> Optional[str]:
+    """
+    便捷函数：通过 spec_id 获取 proposal.md 内容
+    
+    Args:
+        workspace_path: 工作空间路径
+        spec_id: OpenSpec ID
+        
+    Returns:
+        proposal.md 内容
+        
+    路径: /workspace/openspec/changes/{spec_id}/proposal.md
+    
+    Usage:
+        content = get_proposal_content_by_id(
+            workspace_path="/path/to/workspace",
+            spec_id="snake-game"
+        )
+    """
+    reader = OpenSpecReader(workspace_path)
+    return reader.read_proposal(spec_id)
 
 
 def list_available_specs(

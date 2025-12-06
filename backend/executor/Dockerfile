@@ -23,7 +23,7 @@
 #
 # 构建命令：
 #   cd /path/to/coding-assistant
-#   docker build  --no-cache  -f backend/executor/Dockerfile -t coding-assistant-executor:latest .
+#   docker build  -f backend/executor/Dockerfile -t coding-assistant-executor:latest .
 #
 # 环境变量（运行时由 ContainerManager 注入）：
 #   - ANTHROPIC_API_KEY: Claude API 密钥
@@ -43,6 +43,7 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV WORKSPACE_PATH=/workspace
 ENV PYTHONUNBUFFERED=1
+ENV CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
 
 # =============================================================================
 # 系统依赖安装

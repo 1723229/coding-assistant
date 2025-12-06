@@ -84,40 +84,40 @@ class ModuleService:
             # spec_dir.mkdir(parents=True, exist_ok=True)
 
             # 构建提示词
-            prompt = f"""你是一位资深的软件架构师和技术文档专家。请根据以下功能需求，生成一份详细的技术规格文档（Technical Specification Document）。
-
-功能需求：
-{require_content}
-
-注意：
-- 文档应该足够详细，让AI能够根据文档直接生成代码
-- 使用Markdown格式
-- 代码示例使用代码块
-- 表格使用Markdown表格格式
-- 流程图使用Mermaid语法
-
-请直接输出Markdown格式的文档内容，不要有任何额外的解释或说明。"""
-
-            # 获取沙箱服务实例
-            sandbox_service = await session_manager.get_service(
-                session_id=session_id,
-                workspace_path=workspace_path,
-            )
-
-            # 调用沙箱服务生成文档
-            logger.info("Calling sandbox service to generate spec document...")
-            messages = await sandbox_service.chat(prompt=prompt, session_id=session_id)
-
-            # 提取文本内容
-            spec_content = ""
-            for msg in messages:
-                if msg.type == "text":
-                    spec_content += msg.content + "\n"
-
-            if not spec_content.strip():
-                logger.error("Claude did not generate any content")
-                return None
-            return {"spec_content": spec_content}
+#             prompt = f"""你是一位资深的软件架构师和技术文档专家。请根据以下功能需求，生成一份详细的技术规格文档（Technical Specification Document）。
+#
+# 功能需求：
+# {require_content}
+#
+# 注意：
+# - 文档应该足够详细，让AI能够根据文档直接生成代码
+# - 使用Markdown格式
+# - 代码示例使用代码块
+# - 表格使用Markdown表格格式
+# - 流程图使用Mermaid语法
+#
+# 请直接输出Markdown格式的文档内容，不要有任何额外的解释或说明。"""
+#
+#             # 获取沙箱服务实例
+#             sandbox_service = await session_manager.get_service(
+#                 session_id=session_id,
+#                 workspace_path=workspace_path,
+#             )
+#
+#             # 调用沙箱服务生成文档
+#             logger.info("Calling sandbox service to generate spec document...")
+#             messages = await sandbox_service.chat(prompt=prompt, session_id=session_id)
+#
+#             # 提取文本内容
+#             spec_content = ""
+#             for msg in messages:
+#                 if msg.type == "text":
+#                     spec_content += msg.content + "\n"
+#
+#             if not spec_content.strip():
+#                 logger.error("Claude did not generate any content")
+#                 return None
+            return {"spec_content": require_content}
 
         except Exception as e:
             logger.error(f"Failed to generate spec document: {e}", exc_info=True)
@@ -514,78 +514,6 @@ class ModuleService:
                 )
                 module_id = module.id
 
-                yield f"data: {json.dumps({'type': 'step', 'step': 'create_db_record', 'status': 'success', 'message': f'模块ID: {module_id}', 'progress': 65})}\n\n"
-
-                # 步骤6: 生成spec文档
-                if data.require_content:
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'progress', 'message': '正在生成技术规格文档...', 'progress': 70})}\n\n"
-
-                    try:
-                        spec_dict = await self._generate_spec_document(
-                            require_content=data.require_content,
-                            module_name=data.name,
-                            module_code=data.code,
-                            workspace_path=workspace_path,
-                            session_id=session_id
-                        )
-
-                        if spec_dict and spec_dict.get("spec_content"):
-                            yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'data': spec_dict.get('spec_content'), 'progress': 75})}\n\n"
-
-                            # 步骤7: 生成代码
-                            yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'progress', 'message': '正在根据Spec生成代码...', 'progress': 80})}\n\n"
-
-                            commit_id = await generate_code_from_spec(
-                                spec_content=data.require_content,
-                                workspace_path=workspace_path,
-                                session_id=session_id,
-                                module_code=data.code,
-                                module_name=data.name,
-                                module_url=data.url,
-                                task_type="spec"
-                            )
-
-                            if commit_id:
-                                yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'success', 'message': f'代码生成成功, Commit: {commit_id[:8]}', 'progress': 85})}\n\n"
-
-                                # 更新commit ID
-                                module_data.update({"latest_commit_id": commit_id, "spec_content": spec_dict.get("spec_content")})
-                                await self.module_repo.update_module(module_id=module_id, data=module_data)
-
-                                # 步骤8: 创建版本记录
-                                yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 90})}\n\n"
-
-                                try:
-                                    version_code = f"v{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                                    version_data = VersionCreate(
-                                        code=version_code,
-                                        module_id=module_id,
-                                        msg=f"{data.name} ({data.code}) 功能实现",
-                                        commit=commit_id
-                                    )
-                                    version = await self.version_repo.create_version(data=version_data, created_by=created_by)
-
-                                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'success', 'message': f'版本: {version_code}', 'progress': 92})}\n\n"
-                                except Exception as e:
-                                    logger.error(f"Failed to create version: {e}")
-                            else:
-                                yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'warning', 'message': '代码生成未产生提交', 'progress': 85})}\n\n"
-                        else:
-                            await self.module_repo.delete_module(module_id=module_id)
-                            yield f"data: {json.dumps({'type': 'error', 'message': 'Spec文档生成失败'})}\n\n"
-                            return
-
-                    except Exception as e:
-                        logger.error(f"Spec/Code generation failed: {e}", exc_info=True)
-                        await self.module_repo.delete_module(module_id=module_id)
-                        yield f"data: {json.dumps({'type': 'error', 'message': f'文档/代码生成失败: {str(e)}'})}\n\n"
-                        return
-
-
-
-                # 步骤10: 创建菜单
-                yield f"data: {json.dumps({'type': 'step', 'step': 'create_menu', 'status': 'progress', 'message': '创建系统菜单...', 'progress': 98})}\n\n"
-
                 menu = {
                     "full_name": module.name,
                     "english_name": module.code,
@@ -602,7 +530,73 @@ class ModuleService:
                 logger.info(f"preview_url: {settings.preview_ip + ':' + str(container_info['code_port']) + data.url}")
                 await self.module_repo.update_module(module_id=module_id, data=module_data)
 
-                yield f"data: {json.dumps({'type': 'step', 'step': 'create_menu', 'status': 'success', 'message': '菜单创建成功', 'progress': 100})}\n\n"
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_db_record', 'status': 'success', 'message': f'模块ID: {module_id}', 'progress': 65})}\n\n"
+
+                # 步骤6: 生成spec文档
+                if data.require_content:
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'progress', 'message': '正在生成技术规格文档...', 'progress': 70})}\n\n"
+
+                    try:
+                        spec_dict = await self._generate_spec_document(
+                            require_content=data.require_content,
+                            module_name=data.name,
+                            module_code=data.code,
+                            workspace_path=workspace_path,
+                            session_id=session_id
+                        )
+
+                        if spec_dict and spec_dict.get("spec_content"):
+                            # 步骤7: 生成代码
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'progress', 'message': '正在生成预览供您确认...', 'progress': 80})}\n\n"
+
+                            commit_id, spec_content = await generate_code_from_spec(
+                                spec_content=data.require_content,
+                                workspace_path=workspace_path,
+                                session_id=session_id,
+                                module_code=data.code,
+                                module_name=data.name,
+                                module_url=data.url,
+                                task_type="spec"
+                            )
+
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'data': spec_content, 'progress': 75})}\n\n"
+
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'success', 'message': f'预览生成成功, Commit: {commit_id[:8]}', 'progress': 100})}\n\n"
+
+                            # if commit_id:
+                            #
+                            #     # 更新commit ID
+                            #     module_data.update({"latest_commit_id": commit_id, "spec_content": spec_content})
+                            #     await self.module_repo.update_module(module_id=module_id, data=module_data)
+                            #
+                            #     # 步骤8: 创建版本记录
+                            #     yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 90})}\n\n"
+                            #
+                            #     try:
+                            #         version_code = f"v{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                            #         version_data = VersionCreate(
+                            #             code=version_code,
+                            #             module_id=module_id,
+                            #             msg=f"{data.name} ({data.code}) 功能实现",
+                            #             commit=commit_id
+                            #         )
+                            #         version = await self.version_repo.create_version(data=version_data, created_by=created_by)
+                            #
+                            #         yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'success', 'message': f'版本: {version_code}', 'progress': 100})}\n\n"
+                            #     except Exception as e:
+                            #         logger.error(f"Failed to create version: {e}")
+                            # else:
+                            #     yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'warning', 'message': '代码生成未产生提交', 'progress': 85})}\n\n"
+                        else:
+                            await self.module_repo.delete_module(module_id=module_id)
+                            yield f"data: {json.dumps({'type': 'error', 'message': 'Spec文档生成失败'})}\n\n"
+                            return
+
+                    except Exception as e:
+                        logger.error(f"Spec/Code generation failed: {e}", exc_info=True)
+                        await self.module_repo.delete_module(module_id=module_id)
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'文档/代码生成失败: {str(e)}'})}\n\n"
+                        return
 
                 # 完成
                 module = await self.module_repo.get_module_by_id(module_id=module_id)
@@ -934,7 +928,7 @@ class ModuleService:
                     module_code=module.code,
                     module_name=module.name,
                     module_url=module.url or "",
-                    task_type="preview"
+                    task_type=""
                 )
 
                 if not commit_id:

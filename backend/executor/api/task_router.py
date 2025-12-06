@@ -108,36 +108,28 @@ async def stream_generator(
     Otherwise, uses regular streaming execution.
     """
     try:
-        # Send connection confirmation
         yield f"data: {json.dumps({'type': 'connected', 'session_id': session_id})}\n\n"
-        await asyncio.sleep(0)  # Force flush
+        await asyncio.sleep(0)
         
-        # Check if this is an OpenSpec task
         task_type = task_data.get("task_type")
         
         if task_type in ("spec", "preview", "build"):
-            # Use OpenSpec streaming flow
-            logger.info(f"Using OpenSpec flow for task_type: {task_type}, session: {session_id}")
             async for event in streaming_service.execute_openspec_stream(task_data):
-                event_json = json.dumps(event)
-                yield f"data: {event_json}\n\n"
-                await asyncio.sleep(0.01)  # Small delay to prevent flooding
+                yield f"data: {json.dumps(event)}\n\n"
+                await asyncio.sleep(0.01)
         else:
-            # Use regular streaming execution
             async for event in streaming_service.execute_stream(task_data):
-                event_json = json.dumps(event)
-                yield f"data: {event_json}\n\n"
-                await asyncio.sleep(0.01)  # Small delay to prevent flooding
+                yield f"data: {json.dumps(event)}\n\n"
+                await asyncio.sleep(0.01)
         
-        # Send completion event
         yield f"data: {json.dumps({'type': 'response_complete'})}\n\n"
         
     except asyncio.CancelledError:
-        logger.info(f"Stream cancelled for session: {session_id}")
+        logger.info(f"Stream cancelled: {session_id}")
         yield f"data: {json.dumps({'type': 'interrupted', 'message': 'Stream cancelled'})}\n\n"
         
     except Exception as e:
-        logger.exception(f"Error in stream for session {session_id}")
+        logger.exception(f"Stream error: {session_id}")
         yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
 
 
