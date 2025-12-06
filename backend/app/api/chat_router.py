@@ -381,12 +381,14 @@ async def chat_stream_auto_commit(
 
         workspace_path = session.workspace_path
         logger.info(f"[SSE Auto-Commit] Starting chat for session: {session.name}")
-        commit_id = await generate_code_from_spec(
+        commit_id, _ = await generate_code_from_spec(
             spec_content=request.content,
             session_id=session_id,
             workspace_path=workspace_path,
             module_name=module.name,
             module_code=module.code,
+            module_url=module.url or "",
+            task_type=""
         )
         if commit_id:
             logger.info(f"[SSE Auto-Commit] Commit ID: {commit_id}")

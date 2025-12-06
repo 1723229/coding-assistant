@@ -70,11 +70,14 @@ async def lifespan(app: FastAPI):
         logger.warning("Application will start but database operations may fail")
     
     # Start session cleanup task
-    try:
-        await session_manager.start_cleanup_task()
-        logger.info("Session manager started")
-    except Exception as e:
-        logger.error(f"Session manager failed to start: {e}")
+    # NOTE: 禁用自动清理任务，避免模块容器被误删
+    # 如需清理，请手动调用 DELETE /api/code/container/{session_id}
+    # try:
+    #     await session_manager.start_cleanup_task()
+    #     logger.info("Session manager started")
+    # except Exception as e:
+    #     logger.error(f"Session manager failed to start: {e}")
+    logger.info("Session manager initialized (auto-cleanup disabled)")
     
     logger.info("Application startup complete")
     logger.info(f"Server URL: http://{ServerConfig.HOST}:{ServerConfig.PORT}")
@@ -87,13 +90,15 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down application...")
     
-    # Stop session cleanup task
-    try:
-        await session_manager.stop_cleanup_task()
-        await session_manager.close_all()
-        logger.info("Session manager stopped")
-    except Exception as e:
-        logger.error(f"Error stopping session manager: {e}")
+    # Stop session cleanup task (if enabled)
+    # NOTE: 自动清理已禁用，关闭时不删除容器
+    # try:
+    #     await session_manager.stop_cleanup_task()
+    #     await session_manager.close_all()
+    #     logger.info("Session manager stopped")
+    # except Exception as e:
+    #     logger.error(f"Error stopping session manager: {e}")
+    logger.info("Session manager shutdown (containers preserved)")
     
     # Close database connections
     try:
