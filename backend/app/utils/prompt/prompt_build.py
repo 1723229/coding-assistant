@@ -15,7 +15,7 @@ async def generate_code_from_spec(
         module_code: str,
         module_url: str,
         task_type: str
-) -> Tuple[Optional[str], Optional[str]]:
+) -> Tuple[Optional[str], Optional[list[MessageType]]]:
     """
     使用 Claude 根据规格文档生成代码并commit
 
@@ -58,6 +58,7 @@ async def generate_code_from_spec(
         all_messages = []
         async for msg in sandbox_service.chat_stream(prompt=prompt, session_id=session_id, task_type=task_type):
             all_messages.append(msg)
+            logger.info(f"Claude message: {msg.type} - {msg.content}")
             # 记录重要的消息类型
             if msg.type in [MessageType.TOOL_USE.value, MessageType.ERROR.value]:
                 logger.info(f"Claude message: {msg.type} - {msg.content[:200]}")
@@ -80,9 +81,10 @@ async def generate_code_from_spec(
         has_error = any(msg.type == MessageType.ERROR.value for msg in all_messages)
         if has_error:
             logger.error("Claude encountered errors during code generation")
-            return None, proposal_content
+            return proposal_content, all_messages
 
         logger.info("Code generation completed, now committing changes...")
+        return proposal_content, all_messages
 
         # 使用 GitHubService 进行本地 commit
         try:
@@ -115,7 +117,7 @@ async def generate_code_from_spec(
 
     except Exception as e:
         logger.error(f"Failed to generate code from spec: {e}", exc_info=True)
-        return None, proposal_content
+        return proposal_content, []
 
 
 class PromptBuild:
