@@ -76,3 +76,4 @@ executor:
   anthropic_api_key: "sk-e43189bfbcc24a01bab723f9ebb38e81"
   anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic"
   anthropic_model: "qwen3-coder-plus"
+
