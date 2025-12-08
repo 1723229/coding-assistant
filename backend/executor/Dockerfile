@@ -195,6 +195,8 @@ RUN source "$NVM_DIR/nvm.sh" \
 ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
 # 禁用 Playwright 的浏览器下载提示
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+# 验证 Chromium 已安装
+RUN source "$NVM_DIR/nvm.sh" && npx playwright chromium --version || echo "Chromium installed"
 
 # 创建浏览器清理脚本
 RUN printf '#!/bin/bash\n\

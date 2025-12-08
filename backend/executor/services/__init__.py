@@ -3,7 +3,9 @@
 Executor services module.
 """
 
-from executor.services.agent_service import AgentService
-from executor.services.streaming_service import StreamingAgentService
+from executor.services.agent_service import StreamingAgentService
+
+# Alias for backward compatibility
+AgentService = StreamingAgentService
 
 __all__ = ["AgentService", "StreamingAgentService"]

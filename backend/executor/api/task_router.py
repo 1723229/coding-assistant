@@ -15,17 +15,14 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from executor.services.agent_service import AgentService
-from executor.services.streaming_service import StreamingAgentService
-from executor.agents.base import TaskStatus
+from executor.services.agent_service import StreamingAgentService
 
 logger = logging.getLogger(__name__)
 
 # Create router
 task_router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
-# Create services
-agent_service = AgentService()
+# Create service (singleton)
 streaming_service = StreamingAgentService()
 
 
@@ -40,6 +37,7 @@ class ExecuteRequest(BaseModel):
     system_prompt: Optional[dict] = None
     model: Optional[str] = None
     task_type: Optional[str] = None  # "spec", "preview", "build"
+    mcp_servers: Optional[dict] = None  # MCP server configurations
 
 
 class ExecuteResponse(BaseModel):
@@ -57,41 +55,6 @@ class SessionResponse(BaseModel):
     """Response model for session operations."""
     status: str
     message: str
-
-
-@task_router.post("/execute", response_model=ExecuteResponse)
-async def execute_task(request: ExecuteRequest):
-    """
-    Execute a task synchronously.
-    
-    This endpoint blocks until the task is completed and returns the result.
-    For streaming responses, use the /stream endpoint instead.
-    """
-    logger.info(f"Received execute request for session: {request.session_id}")
-    
-    try:
-        task_data = request.model_dump()
-        status, error_msg, result = agent_service.execute_task(task_data)
-        
-        if status == TaskStatus.COMPLETED:
-            return ExecuteResponse(
-                status="success",
-                session_id=request.session_id,
-                text_content=result.get("text_content") if result else None,
-                tool_uses=result.get("tool_uses") if result else None,
-                thinking=result.get("thinking") if result else None,
-                metadata=result.get("metadata") if result else None,
-            )
-        else:
-            return ExecuteResponse(
-                status="failed",
-                session_id=request.session_id,
-                error_message=error_msg,
-            )
-            
-    except Exception as e:
-        logger.exception(f"Error executing task for session {request.session_id}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 async def stream_generator(
@@ -174,15 +137,7 @@ async def cancel_task(session_id: str = Query(..., description="Session ID to ca
     """Cancel a running task."""
     logger.info(f"Received cancel request for session: {session_id}")
     
-    # Try streaming service first
     if streaming_service.cancel_task(session_id):
         return SessionResponse(status="success", message="Task cancelled")
-    
-    # Fall back to regular agent service
-    status, message = agent_service.cancel_task(session_id)
-    
-    if status == TaskStatus.SUCCESS:
-        return SessionResponse(status="success", message=message)
     else:
-        raise HTTPException(status_code=400, detail=message)
-
+        raise HTTPException(status_code=400, detail="No active task found for session")

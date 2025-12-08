@@ -17,9 +17,7 @@ import uvicorn
 
 from executor.config import config
 from executor.api.task_router import task_router
-from executor.services.agent_service import AgentService
-from executor.services.streaming_service import StreamingAgentService
-from executor.agents.base import TaskStatus
+from executor.services.agent_service import StreamingAgentService
 
 # Configure logging
 logging.basicConfig(
@@ -44,15 +42,15 @@ async def lifespan(app: FastAPI):
     
     # Note: We don't change to workspace directory here because
     # the volume mount may not be ready yet at startup time.
-    # The streaming_service will handle directory changes per-session.
+    # The agent_service will handle directory changes per-session.
     
     yield
     
     # Shutdown
     logger.info("Executor service shutting down...")
     try:
-        streaming_service = StreamingAgentService()
-        await streaming_service.close_all_sessions()
+        agent_service = StreamingAgentService()
+        await agent_service.close_all_sessions()
     except Exception as e:
         logger.warning(f"Error during shutdown: {e}")
     logger.info("Executor service shutdown complete")
@@ -68,9 +66,6 @@ app = FastAPI(
 
 # Include routers
 app.include_router(task_router)
-
-# Create services for legacy endpoints
-agent_service = AgentService()
 
 
 # ===================
@@ -94,23 +89,16 @@ async def delete_session(session_id: str):
     """Delete an agent session."""
     logger.info(f"Received delete request for session: {session_id}")
     
-    # Try streaming service first
-    streaming_service = StreamingAgentService()
-    await streaming_service.close_session(session_id)
+    agent_service = StreamingAgentService()
+    await agent_service.close_session(session_id)
     
-    # Also try regular agent service
-    status, message = agent_service.delete_session(session_id)
-    
-    if status == TaskStatus.SUCCESS:
-        return SessionResponse(status="success", message=message)
-    else:
-        # If neither service had the session, still return success
-        return SessionResponse(status="success", message="Session deleted")
+    return SessionResponse(status="success", message="Session deleted")
 
 
 @app.get("/api/sessions", response_model=SessionListResponse)
 async def list_sessions():
     """List all active agent sessions."""
+    agent_service = StreamingAgentService()
     sessions = agent_service.list_sessions()
     return SessionListResponse(total=len(sessions), sessions=sessions)
 
@@ -118,15 +106,10 @@ async def list_sessions():
 @app.delete("/api/sessions", response_model=SessionResponse)
 async def close_all_sessions():
     """Close all agent sessions."""
-    streaming_service = StreamingAgentService()
-    await streaming_service.close_all_sessions()
+    agent_service = StreamingAgentService()
+    await agent_service.close_all_sessions()
     
-    status, message = await agent_service.close_all_sessions()
-    
-    if status == TaskStatus.SUCCESS:
-        return SessionResponse(status="success", message=message)
-    else:
-        raise HTTPException(status_code=500, detail=message)
+    return SessionResponse(status="success", message="All sessions closed")
 
 
 # ===================
@@ -152,9 +135,9 @@ async def root():
         "version": "1.0.0",
         "description": "Claude Code execution service with SSE streaming",
         "endpoints": {
-            "execute": "POST /api/tasks/execute",
             "stream": "POST /api/tasks/stream",
             "cancel": "POST /api/tasks/cancel",
+            "sessions": "GET /api/sessions",
             "health": "GET /health",
         }
     }
