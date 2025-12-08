@@ -125,6 +125,36 @@ async def optimize_module_stream(
         }
     )
 
+@module_router.post(
+    "/build/{session_id}/stream",
+    summary="优化模块代码（流式）",
+    operation_id="build_module_stream"
+)
+async def build_module_stream(
+    session_id: str = Path(..., description="Session ID"),
+    optimization_request: dict = None
+):
+    """
+    优化已创建的POINT类型模块（SSE流式）
+
+    事件类型：
+    - connected: 连接建立
+    - step: 步骤进度更新
+    - error: 错误信息
+    - complete: 优化完成
+    """
+    content = optimization_request.get("content") if optimization_request else ""
+    updated_by = optimization_request.get("updated_by") if optimization_request else None
+    return StreamingResponse(
+        module_service.build_module_stream(session_id, content, updated_by),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
 
 @module_router.get(
     "/{module_id}",

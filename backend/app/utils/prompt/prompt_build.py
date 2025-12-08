@@ -15,7 +15,7 @@ async def generate_code_from_spec(
         module_code: str,
         module_url: str,
         task_type: str
-) -> Tuple[Optional[str], Optional[list[MessageType]]]:
+) -> Tuple[Optional[str], Optional[list[str]]]:
     """
     使用 Claude 根据规格文档生成代码并commit
 
@@ -57,8 +57,8 @@ async def generate_code_from_spec(
         # 收集所有消息用于日志
         all_messages = []
         async for msg in sandbox_service.chat_stream(prompt=prompt, session_id=session_id, task_type=task_type):
-            all_messages.append(msg)
-            logger.info(f"Claude message: {msg.type} - {msg.content}")
+            if msg.type == MessageType.TEXT or msg.type == MessageType.TEXT_DELTA:
+                all_messages.append(msg.content)
             # 记录重要的消息类型
             if msg.type in [MessageType.TOOL_USE.value, MessageType.ERROR.value]:
                 logger.info(f"Claude message: {msg.type} - {msg.content[:200]}")

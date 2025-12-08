@@ -13,6 +13,7 @@ from typing import Optional, AsyncGenerator
 from pathlib import Path
 from fastapi import Query
 
+from app.api.chat_router import module_repo
 from app.config.logging_config import log_print
 from app.config import get_settings
 from app.utils.model.response_model import BaseResponse, ListResponse
@@ -531,6 +532,18 @@ class ModuleService:
 
                 # 步骤6: 生成spec文档
                 if data.require_content:
+                    try:
+                        await message_repo.create_message(
+                            session_id=session_id,
+                            role='user',
+                            content=data.require_content,
+                            tool_name=None,
+                            tool_input=None,
+                            tool_result=None,
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to save messages: {e}", exc_info=True)
+
                     yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'progress', 'message': '正在生成技术规格文档...', 'progress': 80})}\n\n"
 
                     try:
@@ -547,35 +560,23 @@ class ModuleService:
                             yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'data': spec_content, 'progress': 85})}\n\n"
                         else:
                             yield f"data: {json.dumps({'type': 'error', 'message': 'Spec文档生成失败', 'data': spec_content, 'progress': 85})}\n\n"
+                        # 保存会话
+                        if msg_list:
+                            try:
+                                await message_repo.create_message(
+                                    session_id=session_id,
+                                    role='assistant',
+                                    content="".join(msg_list),
+                                    tool_name=None,
+                                    tool_input=None,
+                                    tool_result=None,
+                                )
+                            except Exception as e:
+                                logger.error(f"Failed to save messages: {e}", exc_info=True)
 
                         yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'progress', 'message': '正在生成预览供您确认...', 'progress': 90})}\n\n"
 
                         yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'success', 'message': f'预览生成成功', 'progress': 100})}\n\n"
-
-                        # if commit_id:
-                        #
-                        #     # 更新commit ID
-                        #     module_data.update({"latest_commit_id": commit_id, "spec_content": spec_content})
-                        #     await self.module_repo.update_module(module_id=module_id, data=module_data)
-                        #
-                        #     # 步骤8: 创建版本记录
-                        #     yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 90})}\n\n"
-                        #
-                        #     try:
-                        #         version_code = f"v{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                        #         version_data = VersionCreate(
-                        #             code=version_code,
-                        #             module_id=module_id,
-                        #             msg=f"{data.name} ({data.code}) 功能实现",
-                        #             commit=commit_id
-                        #         )
-                        #         version = await self.version_repo.create_version(data=version_data, created_by=created_by)
-                        #
-                        #         yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'success', 'message': f'版本: {version_code}', 'progress': 100})}\n\n"
-                        #     except Exception as e:
-                        #         logger.error(f"Failed to create version: {e}")
-                        # else:
-                        #     yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'warning', 'message': '代码生成未产生提交', 'progress': 85})}\n\n"
 
                     except Exception as e:
                         logger.error(f"Spec/Code generation failed: {e}", exc_info=True)
@@ -852,54 +853,23 @@ class ModuleService:
 
             yield f"data: {json.dumps({'type': 'step', 'step': 'verify_workspace', 'status': 'success', 'message': '工作空间验证成功', 'progress': 20}, ensure_ascii=False)}\n\n"
 
-            # 步骤3: 加载历史会话消息
-            yield f"data: {json.dumps({'type': 'step', 'step': 'load_history', 'status': 'progress', 'message': '加载历史会话...', 'progress': 25}, ensure_ascii=False)}\n\n"
-
-            try:
-                # 从message表加载历史消息
-                await message_repo.create_message(
-                    session_id=session_id,
-                    role='user',
-                    content=content,
-                    tool_name=None,
-                    tool_input=None,
-                    tool_result=None,
-                )
-                messages = await message_repo.get_session_messages(session_id=session_id, limit=50)
-
-                yield f"data: {json.dumps({'type': 'step', 'step': 'load_history', 'status': 'success', 'message': f'加载了 {len(messages)} 条历史消息', 'progress': 30}, ensure_ascii=False)}\n\n"
-            except Exception as e:
-                logger.warning(f"Failed to load conversation history: {e}")
-                conversation_context = ""
-                yield f"data: {json.dumps({'type': 'step', 'step': 'load_history', 'status': 'warning', 'message': '未找到历史会话', 'progress': 30}, ensure_ascii=False)}\n\n"
-
-            # 步骤4: 读取当前spec_content
-            yield f"data: {json.dumps({'type': 'step', 'step': 'read_spec', 'status': 'progress', 'message': '读取当前spec文档...', 'progress': 35}, ensure_ascii=False)}\n\n"
-
-
-            yield f"data: {json.dumps({'type': 'step', 'step': 'read_spec', 'status': 'success', 'message': 'spec文档读取完成', 'progress': 40}, ensure_ascii=False)}\n\n"
+            await message_repo.create_message(
+                session_id=session_id,
+                role='user',
+                content=content,
+                tool_name=None,
+                tool_input=None,
+                tool_result=None,
+            )
 
             # 步骤5: 生成更新后的spec文档
             yield f"data: {json.dumps({'type': 'step', 'step': 'update_spec', 'status': 'progress', 'message': '根据优化需求更新spec文档...', 'progress': 45}, ensure_ascii=False)}\n\n"
-
-            try:
-                updated_spec = await self._generate_spec_document(require_content=content, module_code= module.code, module_name= module.name, workspace_path= workspace_path, session_id=session_id )
-
-                yield f"data: {json.dumps({'type': 'step', 'step': 'update_spec', 'status': 'success', 'message': 'Spec文档更新成功', 'progress': 55}, ensure_ascii=False)}\n\n"
-
-                # 更新数据库中的spec_content
-                module.spec_content = updated_spec
-
-            except Exception as e:
-                logger.error(f"Failed to update spec: {e}", exc_info=True)
-                yield f"data: {json.dumps({'type': 'error', 'message': f'Spec文档更新失败: {str(e)}'}, ensure_ascii=False)}\n\n"
-                return
 
             # 步骤6: 生成优化后的代码
             yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'progress', 'message': '根据更新后的Spec生成代码...', 'progress': 60}, ensure_ascii=False)}\n\n"
 
             try:
-                commit_id, _ = await generate_code_from_spec(
+                spec_content, msg_list = await generate_code_from_spec(
                     spec_content=content,
                     workspace_path=workspace_path,
                     session_id=session_id,
@@ -908,11 +878,21 @@ class ModuleService:
                     module_url=module.url or "",
                     task_type=""
                 )
-
-                if not commit_id:
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'warning', 'message': '代码生成未产生新的提交', 'progress': 75}, ensure_ascii=False)}\n\n"
-                else:
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'success', 'message': f'代码生成成功, Commit: {commit_id[:8]}', 'progress': 75}, ensure_ascii=False)}\n\n"
+                # 保存会话
+                if msg_list:
+                    try:
+                        await message_repo.create_message(
+                            session_id=session_id,
+                            role='assistant',
+                            content="".join(msg_list),
+                            tool_name=None,
+                            tool_input=None,
+                            tool_result=None,
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to save messages: {e}", exc_info=True)
+                module_update = ModuleUpdate(spec_content=spec_content)
+                module_repo.update_module(module_id=module.session_id, module_update=module_update)
 
             except Exception as e:
                 logger.error(f"Failed to generate code: {e}", exc_info=True)
@@ -958,26 +938,151 @@ class ModuleService:
             #     logger.error(f"Failed to update module: {e}")
             #     yield f"data: {json.dumps({'type': 'step', 'step': 'update_module', 'status': 'warning', 'message': '模块更新失败', 'progress': 100}, ensure_ascii=False)}\n\n"
 
-            # 步骤9: 重启容器
-            # yield f"data: {json.dumps({'type': 'step', 'step': 'restart_container', 'status': 'progress', 'message': '重启沙箱容器...', 'progress': 95}, ensure_ascii=False)}\n\n"
-            #
-            # if module.session_id:
-            #     try:
-            #         executor = get_sandbox_executor()
-            #         await executor.restart_container(
-            #             session_id=module.session_id,
-            #             workspace_path=module.workspace_path or ""
-            #         )
-            #         yield f"data: {json.dumps({'type': 'step', 'step': 'restart_container', 'status': 'success', 'message': '容器重启成功', 'progress': 100}, ensure_ascii=False)}\n\n"
-            #     except Exception as e:
-            #         logger.warning(f"Failed to restart container: {e}")
-            #         yield f"data: {json.dumps({'type': 'step', 'step': 'restart_container', 'status': 'warning', 'message': f'容器重启失败: {str(e)}', 'progress': 100}, ensure_ascii=False)}\n\n"
-            # else:
-            #     yield f"data: {json.dumps({'type': 'step', 'step': 'restart_container', 'status': 'warning', 'message': '模块无关联会话', 'progress': 100}, ensure_ascii=False)}\n\n"
 
             # 完成
-            yield f"data: {json.dumps({'type': 'complete', 'module_id': module.id, 'commit_id': commit_id, 'version_id': '', 'message': '优化完成'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'module_id': module.id, 'spec_content': spec_content, 'version_id': '', 'message': '优化完成'}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             logger.error(f"Optimization stream failed: {e}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'message': f'优化失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+
+    async def build_module_stream(
+            self,
+            session_id: str,
+            content: str,
+            updated_by: Optional[str] = None
+    ) -> AsyncGenerator[str, None]:
+        try:
+            # 发送连接确认
+            yield f"data: {json.dumps({'type': 'connected', 'message': '开始生成代码'}, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(0)
+
+            # 步骤1: 查找模块
+            yield f"data: {json.dumps({'type': 'step', 'step': 'find_module', 'status': 'progress', 'message': '查找模块...', 'progress': 5}, ensure_ascii=False)}\n\n"
+
+            module = await self.module_repo.get_module_by_session_id(session_id=session_id)
+            if not module:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Session ID {session_id} 对应的模块不存在'}, ensure_ascii=False)}\n\n"
+                return
+
+            if module.type != ModuleType.POINT:
+                yield f"data: {json.dumps({'type': 'error', 'message': '只能优化POINT类型模块'}, ensure_ascii=False)}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'find_module', 'status': 'success', 'message': f'找到模块: {module.name}', 'progress': 10}, ensure_ascii=False)}\n\n"
+
+            # 步骤2: 验证工作空间
+            yield f"data: {json.dumps({'type': 'step', 'step': 'verify_workspace', 'status': 'progress', 'message': '验证工作空间...', 'progress': 15}, ensure_ascii=False)}\n\n"
+
+            workspace_path = module.workspace_path
+            if not workspace_path or not Path(workspace_path).exists():
+                yield f"data: {json.dumps({'type': 'error', 'message': '工作空间不存在'}, ensure_ascii=False)}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'verify_workspace', 'status': 'success', 'message': '工作空间验证成功', 'progress': 20}, ensure_ascii=False)}\n\n"
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'code_build', 'status': 'success', 'message': '开始生成代码', 'progress': 30}, ensure_ascii=False)}\n\n"
+            # 步骤3: 生成代码
+            try:
+                spec_content, msg_list = await generate_code_from_spec(
+                    spec_content=content,
+                    workspace_path=workspace_path,
+                    session_id=session_id,
+                    module_code=module.code,
+                    module_name=module.name,
+                    module_url=module.url or "",
+                    task_type="build"
+                )
+                # 保存会话
+                if msg_list:
+                    try:
+                        await message_repo.create_message(
+                            session_id=session_id,
+                            role='assistant',
+                            content="".join(msg_list),
+                            tool_name=None,
+                            tool_input=None,
+                            tool_result=None,
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to save messages: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'step', 'step': 'code_build', 'status': 'success', 'message': '代码生成成功', 'progress': 40}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"Failed to generate code: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'代码生成失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤4: 创建版本记录
+            yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 50}, ensure_ascii=False)}\n\n"
+            # 使用 GitHubService 进行本地 commit
+            commit_id = None
+            try:
+                yield f"data: {json.dumps({'type': 'step', 'step': 'commit', 'status': 'success', 'message': f'代码进行commit', 'progress': 55}, ensure_ascii=False)}\n\n"
+                # Commit message
+                commit_message = f"[SpecCoding Auto Commit] - {module.name} ({module.code}) 功能实现"
+
+                # 执行commit
+                from git import Repo
+                repo = Repo(workspace_path)
+
+                # Add all changes
+                repo.git.add(A=True)
+
+                # Check if there are changes to commit
+                if repo.is_dirty() or repo.untracked_files:
+                    # Commit
+                    commit = repo.index.commit(commit_message)
+                    commit_id = commit.hexsha[:12]  # 使用前12位
+
+                    logger.info(f"Code committed successfully: {commit_id}")
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'commit', 'status': 'success', 'message': f'commit完成,id: {commit_id}', 'progress': 60}, ensure_ascii=False)}\n\n"
+                else:
+                    logger.warning("No changes to commit")
+
+            except Exception as e:
+                logger.error(f"Failed to commit code: {e}", exc_info=True)
+
+
+            version_id = None
+            try:
+                version_code = f"v{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                version_data = VersionCreate(
+                    code=version_code,
+                    module_id=module.id,
+                    msg=f"{module.name} 代码优化: {content[:100]}",
+                    commit=commit_id
+                )
+                version = await self.version_repo.create_version(
+                    data=version_data,
+                    created_by=updated_by
+                )
+                version_id = version.id
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'success', 'message': f'版本创建成功: {version_code}', 'progress': 80}, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                logger.error(f"Failed to create version: {e}")
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'warning', 'message': '版本创建失败', 'progress': 80}, ensure_ascii=False)}\n\n"
+
+            # 步骤5: 更新模块的latest_commit_id
+            yield f"data: {json.dumps({'type': 'step', 'step': 'update_module', 'status': 'progress', 'message': '更新模块信息...', 'progress': 90}, ensure_ascii=False)}\n\n"
+
+            try:
+                module_update = ModuleUpdate(latest_commit_id=commit_id, spec_content=spec_content)
+                await self.module_repo.update_module(
+                    module_id=module.id,
+                    data=module_update
+                )
+                yield f"data: {json.dumps({'type': 'step', 'step': 'update_module', 'status': 'success', 'message': '模块信息更新成功', 'progress': 100}, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                logger.error(f"Failed to update module: {e}")
+                yield f"data: {json.dumps({'type': 'step', 'step': 'update_module', 'status': 'warning', 'message': '模块更新失败', 'progress': 100}, ensure_ascii=False)}\n\n"
+
+            # 完成
+            yield f"data: {json.dumps({'type': 'complete', 'module_id': module.id, 'spec_content': spec_content, 'version_id': version_id, 'message': '代码构建完成'}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Optimization stream failed: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'优化失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+
+
