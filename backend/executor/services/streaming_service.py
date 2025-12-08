@@ -100,9 +100,11 @@ class StreamingAgentService:
                 "append": "You are helping the user with their coding tasks in a sandbox environment.",
             }
 
-        # Build base options
+        # Build base options with MCP tools included by default
+        base_tools = allowed_tools or config.DEFAULT_TOOLS.copy()
+        
         options_kwargs = {
-            "allowed_tools": allowed_tools or config.DEFAULT_TOOLS.copy(),
+            "allowed_tools": base_tools,
             "system_prompt": prompt_config,
             "permission_mode": permission_mode or config.PERMISSION_MODE,
             "cwd": workspace_path,
@@ -111,20 +113,29 @@ class StreamingAgentService:
             "setting_sources": ["project", "local", "user"],
         }
 
-        # Add MCP servers if provided
-        if mcp_servers:
-            options_kwargs["mcp_servers"] = mcp_servers
-            logger.info(f"Configuring MCP servers: {list(mcp_servers.keys())}")
+        # Add MCP servers - use default if not provided
+        effective_mcp_servers = mcp_servers or config.DEFAULT_MCP_SERVERS
+        if effective_mcp_servers:
+            options_kwargs["mcp_servers"] = effective_mcp_servers
+            logger.info(f"Configuring MCP servers: {list(effective_mcp_servers.keys())}")
 
-            # Automatically add MCP tools to allowed_tools if not already present
-            # MCP tools follow the pattern: mcp__<server_name>__<tool_name>
-            # We add a wildcard pattern to allow all MCP tools from configured servers
-            current_tools = options_kwargs["allowed_tools"]
-            for server_name in mcp_servers.keys():
-                mcp_tool_prefix = f"mcp__{server_name}__"
-                # Check if we should add MCP tool patterns
-                # The SDK should handle this automatically, but we log it
-                logger.debug(f"MCP server '{server_name}' tools will be available with prefix: {mcp_tool_prefix}")
+            # Automatically add MCP tools to allowed_tools
+            # This ensures Claude can use the MCP tools without explicit permission
+            current_tools = list(options_kwargs["allowed_tools"])
+            
+            for server_name in effective_mcp_servers.keys():
+                if server_name == "playwright":
+                    # Add all Playwright MCP tools
+                    for tool in config.PLAYWRIGHT_MCP_TOOLS:
+                        if tool not in current_tools:
+                            current_tools.append(tool)
+                    logger.info(f"Added {len(config.PLAYWRIGHT_MCP_TOOLS)} Playwright MCP tools")
+                else:
+                    # For other MCP servers, log the prefix pattern
+                    mcp_tool_prefix = f"mcp__{server_name}__"
+                    logger.debug(f"MCP server '{server_name}' tools will be available with prefix: {mcp_tool_prefix}")
+            
+            options_kwargs["allowed_tools"] = current_tools
 
         options = ClaudeAgentOptions(**options_kwargs)
         return options
@@ -252,6 +263,7 @@ class StreamingAgentService:
             mcp_servers = config.get_mcp_servers(workspace_path)
             if mcp_servers:
                 logger.info(f"Loaded MCP servers from config: {list(mcp_servers.keys())}")
+        # Note: If still no MCP servers, _create_options will use DEFAULT_MCP_SERVERS
 
         options = self._create_options(
             workspace_path=workspace_path,

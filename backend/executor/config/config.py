@@ -7,7 +7,7 @@ Configuration values are passed from the main backend via environment variables.
 
 import os
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 # Workspace root directory inside container
 WORKSPACE_ROOT = os.environ.get("WORKSPACE_ROOT", "/workspace/")
@@ -39,6 +39,49 @@ DEFAULT_TOOLS = [
     "LS",
     "TodoRead",
     "TodoWrite",
+    "WebFetch",
+]
+
+# =============================================================================
+# Playwright MCP Tools
+# =============================================================================
+# Reference: https://github.com/anthropics/claude-quickstarts/blob/main/autonomous-coding/client.py
+# Full list of Playwright MCP tools for browser automation
+PLAYWRIGHT_MCP_TOOLS = [
+    # Navigation
+    "mcp__playwright__browser_navigate",
+    "mcp__playwright__browser_navigate_back",
+    "mcp__playwright__browser_navigate_forward",
+    # Page interaction
+    "mcp__playwright__browser_click",
+    "mcp__playwright__browser_type",
+    "mcp__playwright__browser_fill",
+    "mcp__playwright__browser_select_option",
+    "mcp__playwright__browser_hover",
+    "mcp__playwright__browser_drag",
+    "mcp__playwright__browser_press_key",
+    # Page state
+    "mcp__playwright__browser_snapshot",
+    "mcp__playwright__browser_take_screenshot",
+    "mcp__playwright__browser_get_text",
+    "mcp__playwright__browser_get_html",
+    # Browser management
+    "mcp__playwright__browser_wait_for",
+    "mcp__playwright__browser_resize",
+    "mcp__playwright__browser_close",
+    "mcp__playwright__browser_install",
+    # Tab management
+    "mcp__playwright__browser_tab_list",
+    "mcp__playwright__browser_tab_new",
+    "mcp__playwright__browser_tab_select",
+    "mcp__playwright__browser_tab_close",
+    # Advanced
+    "mcp__playwright__browser_console_messages",
+    "mcp__playwright__browser_network_requests",
+    "mcp__playwright__browser_file_upload",
+    "mcp__playwright__browser_pdf_save",
+    "mcp__playwright__browser_handle_dialog",
+    "mcp__playwright__browser_generate_playwright_test",
 ]
 
 # Session timeout in seconds
@@ -100,12 +143,41 @@ def get_mcp_servers(workspace_path: Optional[str] = None) -> Dict[str, Any]:
     
     return {}
 
+# =============================================================================
+# Default MCP Servers Configuration
+# =============================================================================
+# MCP servers are automatically loaded when creating Claude agent options.
+# Use get_mcp_servers() to get the active configuration.
+
 # Default MCP servers (commonly used ones)
 DEFAULT_MCP_SERVERS: Dict[str, Any] = {
-    # Playwright for browser automation
+    # Playwright for browser automation (headless mode for container environment)
+    # Uses globally installed mcp-server-playwright command
+    # --headless: Run browser in headless mode
+    # --isolated: Keep browser profile in memory, avoid disk lock issues
+    # --no-sandbox: Required for running in Docker container as root
     "playwright": {
-        "command": "npx",
-        "args": ["@playwright/mcp@latest"],
+        "command": "mcp-server-playwright",
+        "args": ["--headless", "--isolated", "--no-sandbox"],
     },
 }
+
+# Alternative: Use npx to run playwright MCP (downloads on first use)
+NPX_MCP_SERVERS: Dict[str, Any] = {
+    "playwright": {
+        "command": "npx",
+        "args": ["@playwright/mcp@latest", "--headless", "--isolated", "--no-sandbox"],
+    },
+}
+
+def get_default_mcp_tools() -> List[str]:
+    """Get default MCP tools based on configured servers."""
+    tools = []
+    # Add Playwright tools by default
+    tools.extend(PLAYWRIGHT_MCP_TOOLS)
+    return tools
+
+def get_all_default_tools() -> List[str]:
+    """Get all default tools including MCP tools."""
+    return DEFAULT_TOOLS + get_default_mcp_tools()
 

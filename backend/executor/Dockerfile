@@ -49,6 +49,7 @@ ENV CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
 # 系统依赖安装
 # =============================================================================
 RUN apt-get update && apt-get install -y \
+    # 基础工具
     git \
     curl \
     wget \
@@ -59,10 +60,56 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     lsb-release \
     unzip \
+    zip \
+    tar \
+    gzip \
+    bzip2 \
+    xz-utils \
     procps \
     locales \
     fontconfig \
     openssh-client \
+    # Claude Agent SDK 需要的网络/系统工具
+    lsof \
+    net-tools \
+    iproute2 \
+    iputils-ping \
+    dnsutils \
+    telnet \
+    netcat-openbsd \
+    file \
+    tree \
+    htop \
+    less \
+    jq \
+    # 编译工具
+    make \
+    gcc \
+    g++ \
+    # Playwright/Chrome 需要的依赖
+    xvfb \
+    dbus \
+    dbus-x11 \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgtk-3-0 \
+    libx11-xcb1 \
+    libxcb-dri3-0 \
+    libxshmfence1 \
+    libglu1-mesa \
     && rm -rf /var/lib/apt/lists/*
 
 # 生成 locale
@@ -135,6 +182,46 @@ ENV PATH="/root/.nvm/versions/node/v20.19.6/bin:${PATH}"
 RUN node --version && npm --version && npx --version
 
 # =============================================================================
+# Playwright MCP 安装 (用于 MCP 浏览器自动化)
+# =============================================================================
+# 全局安装 @playwright/mcp 避免每次 npx 下载
+# 同时安装 playwright 和 Chromium 浏览器
+RUN source "$NVM_DIR/nvm.sh" \
+    && npm install -g @playwright/mcp@latest \
+    && npx playwright install chromium \
+    && npx playwright install-deps chromium
+
+# 设置 Playwright 环境变量，确保浏览器可被找到
+ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
+# 禁用 Playwright 的浏览器下载提示
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+# 创建浏览器清理脚本
+RUN printf '#!/bin/bash\n\
+# 清理 Playwright/Chrome 浏览器残留进程和锁文件\n\
+pkill -9 -f "chromium" 2>/dev/null || true\n\
+pkill -9 -f "chrome" 2>/dev/null || true\n\
+pkill -9 -f "mcp-server-playwright" 2>/dev/null || true\n\
+# 清理锁文件和临时文件\n\
+rm -f /tmp/.org.chromium.* 2>/dev/null\n\
+rm -rf /tmp/playwright* 2>/dev/null\n\
+rm -rf /tmp/.X* 2>/dev/null\n\
+rm -rf /root/.cache/ms-playwright/.links/*.lock 2>/dev/null\n\
+rm -rf /tmp/playwright-* 2>/dev/null\n\
+echo "Browser cleanup completed"\n\
+' > /usr/local/bin/cleanup-browser \
+    && chmod +x /usr/local/bin/cleanup-browser
+
+# 创建启动包装脚本 - 启动时自动清理浏览器
+RUN printf '#!/bin/bash\n\
+# 启动前清理浏览器残留\n\
+/usr/local/bin/cleanup-browser\n\
+# 启动 executor 服务\n\
+exec python -m executor.main\n\
+' > /usr/local/bin/start-executor \
+    && chmod +x /usr/local/bin/start-executor
+
+# =============================================================================
 # 应用程序安装
 # =============================================================================
 WORKDIR /app
@@ -178,6 +265,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # =============================================================================
 # 启动命令
 # =============================================================================
-# 仅启动 executor 服务，代码服务由 repo 自己的脚本启动
-CMD ["python", "-m", "executor.main"]
+# 使用启动包装脚本，启动前自动清理浏览器残留
+CMD ["/usr/local/bin/start-executor"]
 
