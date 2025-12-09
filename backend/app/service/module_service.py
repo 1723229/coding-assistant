@@ -528,7 +528,7 @@ class ModuleService:
                 logger.info(f"preview_url: {settings.preview_ip + ':' + str(container_info['code_port']) + data.url}")
                 await self.module_repo.update_module(module_id=module_id, data=module_data)
 
-                yield f"data: {json.dumps({'type': 'step', 'step': 'create_db_record', 'status': 'success', 'message': f'模块ID: {module_id}', 'progress': 75})}\n\n"
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_db_record', 'status': 'success', 'message': f'模块ID: {module_id}', 'module_id': module_id, 'progress': 75})}\n\n"
 
                 # 步骤6: 生成spec文档
                 if data.require_content:
@@ -546,23 +546,43 @@ class ModuleService:
 
                     yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'progress', 'message': '正在生成技术规格文档...', 'progress': 80})}\n\n"
 
+                    message_queue = asyncio.Queue()
                     try:
-                        spec_content, msg_list = await generate_code_from_spec(
+                        task = asyncio.create_task(generate_code_from_spec(
                             spec_content=data.require_content,
                             workspace_path=workspace_path,
                             session_id=session_id,
                             module_code=data.code,
                             module_name=data.name,
                             module_url=data.url,
-                            task_type="spec"
+                            task_type="spec",
+                            message_queue=message_queue,)
                         )
+                        buffer = ""
+                        while True:
+                            chunk = await message_queue.get()
+                            if chunk is None:
+                                # 最后 flush 剩余内容（即使没有 \n）
+                                if buffer:
+                                    yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': buffer, 'progress': 85}, ensure_ascii=False)}\n\n"
+                                break
+                            # 累加到缓冲区
+                            buffer += chunk.content
+                            # 持续检查缓冲区中是否有完整的行（以 \n 结尾）
+                            while "\n\n" in buffer:
+                                # 分割出第一个完整行（包含 \n）
+                                line, buffer = buffer.split("\n\n", 1)
+                                # 推送这一整行
+                                yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 85}, ensure_ascii=False)}\n\n"
+                        spec_content, msg_list, result = await task
                         if spec_content:
-                            yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'data': spec_content, 'progress': 85})}\n\n"
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'spec_content': spec_content, 'progress': 85})}\n\n"
                         else:
-                            yield f"data: {json.dumps({'type': 'error', 'message': 'Spec文档生成失败', 'data': spec_content, 'progress': 85})}\n\n"
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'error', 'message': 'Spec文档生成失败', 'spec_content': spec_content, 'progress': 85})}\n\n"
                         # 保存会话
-                        if msg_list:
-                            try:
+
+                        try:
+                            if msg_list:
                                 await message_repo.create_message(
                                     session_id=session_id,
                                     role='assistant',
@@ -571,8 +591,17 @@ class ModuleService:
                                     tool_input=None,
                                     tool_result=None,
                                 )
-                            except Exception as e:
-                                logger.error(f"Failed to save messages: {e}", exc_info=True)
+                            if result:
+                                await message_repo.create_message(
+                                    session_id=session_id,
+                                    role='assistant',
+                                    content="".join(result),
+                                    tool_name=None,
+                                    tool_input=None,
+                                    tool_result=None,
+                                )
+                        except Exception as e:
+                            logger.error(f"Failed to save messages: {e}", exc_info=True)
 
                         yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'progress', 'message': '正在生成预览供您确认...', 'progress': 90})}\n\n"
 
@@ -731,6 +760,8 @@ class ModuleService:
 
             # Delete module from database (cascades to children)
             await self.module_repo.delete_module(module_id=module_id)
+            self.db.execute_update("DELETE FROM sys_module WHERE id=%s", module.url_id)
+            self.db.execute_update("DELETE FROM sys_module WHERE parent_id=%s", module.url_id)
 
             return BaseResponse.success(message="模块删除成功")
         except Exception as e:
@@ -865,22 +896,44 @@ class ModuleService:
             # 步骤5: 生成更新后的spec文档
             yield f"data: {json.dumps({'type': 'step', 'step': 'update_spec', 'status': 'progress', 'message': '根据优化需求更新spec文档...', 'progress': 45}, ensure_ascii=False)}\n\n"
 
-            # 步骤6: 生成优化后的代码
-            yield f"data: {json.dumps({'type': 'step', 'step': 'generate_code', 'status': 'progress', 'message': '根据更新后的Spec生成代码...', 'progress': 60}, ensure_ascii=False)}\n\n"
 
+            message_queue = asyncio.Queue()
             try:
-                spec_content, msg_list = await generate_code_from_spec(
-                    spec_content=content,
+                task = asyncio.create_task(generate_code_from_spec(
+                    spec_content=module.require_content,
                     workspace_path=workspace_path,
                     session_id=session_id,
                     module_code=module.code,
                     module_name=module.name,
-                    module_url=module.url or "",
-                    task_type=""
+                    module_url=module.url,
+                    task_type="",
+                    message_queue=message_queue, )
                 )
+                buffer = ""
+                while True:
+                    chunk = await message_queue.get()
+                    if chunk is None:
+                        # 最后 flush 剩余内容（即使没有 \n）
+                        if buffer:
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': buffer, 'progress': 50}, ensure_ascii=False)}\n\n"
+                        break
+                    # 累加到缓冲区
+                    buffer += chunk.content
+                    # 持续检查缓冲区中是否有完整的行（以 \n 结尾）
+                    while "\n\n" in buffer:
+                        # 分割出第一个完整行（包含 \n）
+                        line, buffer = buffer.split("\n\n", 1)
+                        # 推送这一整行
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 60}, ensure_ascii=False)}\n\n"
+                spec_content, msg_list, result = await task
+                if spec_content:
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'update_spec', 'status': 'success', 'message': 'spec更新成功', 'spec_content': spec_content, 'progress': 80}, ensure_ascii=False)}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'error', 'message': 'spec更新失败', 'spec_content': spec_content, 'progress': 100}, ensure_ascii=False)}\n\n"
+                    return
                 # 保存会话
-                if msg_list:
-                    try:
+                try:
+                    if msg_list:
                         await message_repo.create_message(
                             session_id=session_id,
                             role='assistant',
@@ -889,8 +942,17 @@ class ModuleService:
                             tool_input=None,
                             tool_result=None,
                         )
-                    except Exception as e:
-                        logger.error(f"Failed to save messages: {e}", exc_info=True)
+                    if result:
+                        await message_repo.create_message(
+                            session_id=session_id,
+                            role='assistant',
+                            content="".join(result),
+                            tool_name=None,
+                            tool_input=None,
+                            tool_result=None,
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to save messages: {e}", exc_info=True)
                 module_update = ModuleUpdate(spec_content=spec_content)
                 module_repo.update_module(module_id=module.session_id, module_update=module_update)
 
@@ -899,48 +961,8 @@ class ModuleService:
                 yield f"data: {json.dumps({'type': 'error', 'message': f'代码生成失败: {str(e)}'}, ensure_ascii=False)}\n\n"
                 return
 
-            # 步骤7: 创建版本记录
-            # yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 80}, ensure_ascii=False)}\n\n"
-            #
-            # version_id = None
-            # try:
-            #     version_code = f"v{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            #     version_data = VersionCreate(
-            #         code=version_code,
-            #         module_id=module.id,
-            #         msg=f"{module.name} 代码优化: {content[:100]}",
-            #         commit=commit_id
-            #     )
-            #     version = await self.version_repo.create_version(
-            #         data=version_data,
-            #         created_by=updated_by
-            #     )
-            #     version_id = version.id
-            #
-            #     yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'success', 'message': f'版本创建成功: {version_code}', 'progress': 85}, ensure_ascii=False)}\n\n"
-            # except Exception as e:
-            #     logger.error(f"Failed to create version: {e}")
-            #     yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'warning', 'message': '版本创建失败', 'progress': 85}, ensure_ascii=False)}\n\n"
-
-            # 步骤8: 更新模块的latest_commit_id
-            # yield f"data: {json.dumps({'type': 'step', 'step': 'update_module', 'status': 'progress', 'message': '更新模块信息...', 'progress': 90}, ensure_ascii=False)}\n\n"
-            #
-            # try:
-            #     module.latest_commit_id = commit_id
-            #     module_update = ModuleUpdate(latest_commit_id=commit_id, spec_content=updated_spec)
-            #     logger.debug(f"Module update: {module_update}")
-            #     await self.module_repo.update_module(
-            #         module_id=module.id,
-            #         data=module_update
-            #     )
-            #     yield f"data: {json.dumps({'type': 'step', 'step': 'update_module', 'status': 'success', 'message': '模块信息更新成功', 'progress': 100}, ensure_ascii=False)}\n\n"
-            # except Exception as e:
-            #     logger.error(f"Failed to update module: {e}")
-            #     yield f"data: {json.dumps({'type': 'step', 'step': 'update_module', 'status': 'warning', 'message': '模块更新失败', 'progress': 100}, ensure_ascii=False)}\n\n"
-
-
             # 完成
-            yield f"data: {json.dumps({'type': 'complete', 'module_id': module.id, 'spec_content': spec_content, 'version_id': '', 'message': '优化完成'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'module_id': module.id, 'spec_content': spec_content, 'version_id': '', 'message': '优化完成', 'progress': 100}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             logger.error(f"Optimization stream failed: {e}", exc_info=True)
@@ -983,19 +1005,38 @@ class ModuleService:
 
             yield f"data: {json.dumps({'type': 'step', 'step': 'code_build', 'status': 'success', 'message': '开始生成代码', 'progress': 30}, ensure_ascii=False)}\n\n"
             # 步骤3: 生成代码
+            message_queue = asyncio.Queue()
             try:
-                spec_content, msg_list = await generate_code_from_spec(
-                    spec_content=content,
+                task = asyncio.create_task(generate_code_from_spec(
+                    spec_content=module.require_content,
                     workspace_path=workspace_path,
                     session_id=session_id,
                     module_code=module.code,
                     module_name=module.name,
-                    module_url=module.url or "",
-                    task_type="build"
+                    module_url=module.url,
+                    task_type="build",
+                    message_queue=message_queue, )
                 )
+                buffer = ""
+                while True:
+                    chunk = await message_queue.get()
+                    if chunk is None:
+                        # 最后 flush 剩余内容（即使没有 \n）
+                        if buffer:
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': buffer, 'progress': 50}, ensure_ascii=False)}\n\n"
+                        break
+                    # 累加到缓冲区
+                    buffer += chunk.content
+                    # 持续检查缓冲区中是否有完整的行（以 \n 结尾）
+                    while "\n\n" in buffer:
+                        # 分割出第一个完整行（包含 \n）
+                        line, buffer = buffer.split("\n\n", 1)
+                        # 推送这一整行
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 60}, ensure_ascii=False)}\n\n"
+                spec_content, msg_list, result = await task
                 # 保存会话
-                if msg_list:
-                    try:
+                try:
+                    if msg_list:
                         await message_repo.create_message(
                             session_id=session_id,
                             role='assistant',
@@ -1004,9 +1045,18 @@ class ModuleService:
                             tool_input=None,
                             tool_result=None,
                         )
-                    except Exception as e:
-                        logger.error(f"Failed to save messages: {e}", exc_info=True)
-                yield f"data: {json.dumps({'type': 'step', 'step': 'code_build', 'status': 'success', 'message': '代码生成成功', 'progress': 40}, ensure_ascii=False)}\n\n"
+                    if result:
+                        await message_repo.create_message(
+                            session_id=session_id,
+                            role='assistant',
+                            content="".join(result),
+                            tool_name=None,
+                            tool_input=None,
+                            tool_result=None,
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to save messages: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'step', 'step': 'code_build', 'status': 'success', 'message': '代码生成成功', 'progress': 45}, ensure_ascii=False)}\n\n"
 
             except Exception as e:
                 logger.error(f"Failed to generate code: {e}", exc_info=True)
@@ -1028,20 +1078,26 @@ class ModuleService:
 
                 # Add all changes
                 repo.git.add(A=True)
+                # Check if there are staged changes to commit
+                staged_files = repo.git.diff("--cached", "--name-only")
 
                 # Check if there are changes to commit
-                if repo.is_dirty() or repo.untracked_files:
+                if staged_files.strip():
                     # Commit
                     commit = repo.index.commit(commit_message)
                     commit_id = commit.hexsha[:12]  # 使用前12位
+                    repo.git.push()
 
                     logger.info(f"Code committed successfully: {commit_id}")
                     yield f"data: {json.dumps({'type': 'step', 'step': 'commit', 'status': 'success', 'message': f'commit完成,id: {commit_id}', 'progress': 60}, ensure_ascii=False)}\n\n"
                 else:
                     logger.warning("No changes to commit")
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'commit', 'status': 'skipped', 'message': '无变更，跳过提交', 'progress': 60}, ensure_ascii=False)}\n\n"
+                    return
 
             except Exception as e:
                 logger.error(f"Failed to commit code: {e}", exc_info=True)
+                return
 
 
             version_id = None

@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 
 from app.core.claude_service import session_manager, MessageType
 from app.core.openspec_reader import get_proposal_content_by_id
+from asyncio import Queue
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +15,9 @@ async def generate_code_from_spec(
         module_name: str,
         module_code: str,
         module_url: str,
-        task_type: str
-) -> Tuple[Optional[str], Optional[list[str]]]:
+        task_type: str,
+        message_queue: Queue
+) -> Tuple[Optional[str], Optional[list[str]], Optional[list[str]]]:
     """
     使用 Claude 根据规格文档生成代码并commit
 
@@ -37,9 +39,9 @@ async def generate_code_from_spec(
         # 构建提示词
 
         if task_type == "spec":
-            prompt = f"<Module Info>\n name: {module_name}，english name: {module_code},Module URL:{module_url}\n <User's Proposal>\n  {spec_content} \n - 强调：不允许反问我，不需要澄清，直接执行"
+            prompt = f"<Module Info>\n name: {module_name}，english name: {module_code},Module URL:{module_url}\n <User's Proposal>\n  {spec_content} \n - 强调：不允许反问用户，不需要澄清，不允许让用户确认，直接开始执行"
         elif task_type == "preview":
-            prompt= f"<User's review>\n {spec_content} \n - 强调：不允许反问我，不需要澄清，直接执行"
+            prompt= f"<User's review>\n {spec_content} \n - 强调：不允许反问用户，不需要澄清，不允许让用户确认，直接开始执行"
         else:
             prompt = spec_content
 
@@ -56,9 +58,16 @@ async def generate_code_from_spec(
 
         # 收集所有消息用于日志
         all_messages = []
+        to_data = []
+        result = []
         async for msg in sandbox_service.chat_stream(prompt=prompt, session_id=session_id, task_type=task_type):
+            all_messages.append(msg)
             if msg.type == MessageType.TEXT or msg.type == MessageType.TEXT_DELTA:
-                all_messages.append(msg.content)
+                to_data.append(msg.content)
+                await message_queue.put(msg)
+            if msg.type == MessageType.RESULT:
+                result.append(msg.content)
+                await message_queue.put(msg)
             # 记录重要的消息类型
             if msg.type in [MessageType.TOOL_USE.value, MessageType.ERROR.value]:
                 logger.info(f"Claude message: {msg.type} - {msg.content[:200]}")
@@ -76,48 +85,20 @@ async def generate_code_from_spec(
                     logger.info(f"Successfully read proposal.md for spec_id: {spec_id}, length: {len(proposal_content)}")
                 else:
                     logger.warning(f"Failed to read proposal.md for spec_id: {spec_id}")
+        await message_queue.put(None)
 
         # 检查是否成功
         has_error = any(msg.type == MessageType.ERROR.value for msg in all_messages)
         if has_error:
             logger.error("Claude encountered errors during code generation")
-            return proposal_content, all_messages
+            return proposal_content, to_data, result
 
         logger.info("Code generation completed, now committing changes...")
-        return proposal_content, all_messages
-
-        # 使用 GitHubService 进行本地 commit
-        try:
-
-            # Commit message
-            commit_message = f"[SpecCoding Auto Commit] - {module_name} ({module_code}) 功能实现"
-
-            # 执行commit
-            from git import Repo
-            repo = Repo(workspace_path)
-
-            # Add all changes
-            repo.git.add(A=True)
-
-            # Check if there are changes to commit
-            if repo.is_dirty() or repo.untracked_files:
-                # Commit
-                commit = repo.index.commit(commit_message)
-                commit_id = commit.hexsha[:12]  # 使用前12位
-
-                logger.info(f"Code committed successfully: {commit_id}")
-                return commit_id, proposal_content
-            else:
-                logger.warning("No changes to commit")
-                return None, proposal_content
-
-        except Exception as e:
-            logger.error(f"Failed to commit code: {e}", exc_info=True)
-            return None, proposal_content
+        return proposal_content, to_data, result
 
     except Exception as e:
         logger.error(f"Failed to generate code from spec: {e}", exc_info=True)
-        return proposal_content, []
+        return proposal_content, [], []
 
 
 class PromptBuild:
