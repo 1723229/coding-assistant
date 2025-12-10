@@ -1,7 +1,7 @@
 import logging
 from typing import Optional, Tuple
 
-from app.core.claude_service import session_manager, MessageType
+from app.core.sandbox_service import session_manager, MessageType
 from app.core.openspec_reader import get_proposal_content_by_id
 from asyncio import Queue
 

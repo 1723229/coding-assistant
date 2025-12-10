@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from dataclasses import dataclass
 
 # Import service classes
-from app.core.claude_service import (
+from app.core.sandbox_service import (
     ClaudeService,
     SessionClaudeManager,
     ChatMessage,

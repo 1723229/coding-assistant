@@ -23,7 +23,7 @@ from app.db.schemas import ModuleCreate, ModuleUpdate, ModuleResponse, VersionCr
 from app.db.models.module import ModuleType
 from app.core.executor import get_sandbox_executor
 from app.core.github_service import GitHubService
-from app.core.claude_service import SandboxService, session_manager
+from app.core.sandbox_service import SandboxService, session_manager
 from app.utils.mysql_util import MySQLUtil
 from datetime import datetime
 from app.utils.prompt.prompt_build import generate_code_from_spec

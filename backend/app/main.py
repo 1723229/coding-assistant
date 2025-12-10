@@ -27,7 +27,7 @@ from app.config import ServerConfig, ExecutorConfig
 from app.config.logging_config import LoggingConfig
 from app.utils.exceptions import register_exception_handlers
 from app.db.base import init_db, dispose_db
-from app.core.claude_service import session_manager
+from app.core.sandbox_service import session_manager
 
 # Import API routers
 from app.api import (

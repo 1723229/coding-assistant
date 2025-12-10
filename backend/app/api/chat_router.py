@@ -13,7 +13,7 @@ import logging
 from typing import Optional, Dict, AsyncGenerator
 
 from app.config import get_settings
-from app.core.claude_service import ChatMessage, session_manager
+from app.core.sandbox_service import ChatMessage, session_manager
 from app.db.repository import SessionRepository, MessageRepository, ModuleRepository, VersionRepository
 from app.service.chat_service import ChatService
 from fastapi import APIRouter, Query, Body, Path
