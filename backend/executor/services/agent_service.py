@@ -535,6 +535,7 @@ class StreamingAgentService:
             session: 'StreamingSession',
             prompt: str,
             session_id: str,
+            spec_id:str=None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         执行单个查询并流式返回结果
@@ -628,6 +629,7 @@ class StreamingAgentService:
         workspace_path = task_data.get("workspace_path", "/workspace")
         user_prompt = task_data.get("prompt", "")
         task_type = task_data.get("task_type", "")
+        spec_id = task_data.get("spec_id", "")
 
         try:
             # 获取或创建会话
@@ -688,13 +690,13 @@ class StreamingAgentService:
                 
                 # 步骤1: 执行 openspec list 提取 ID
                 yield {"type": "system", "content": "步骤 1/2: 获取 OpenSpec ID..."}
-                
-                spec_id = None
-                async for event in self._extract_spec_id_via_list(session, session_id):
-                    if event.get("type") == "_spec_id":
-                        spec_id = event.get("content")
-                    elif event.get("type") != "_collected_output":
-                        yield event
+
+                if not spec_id:
+                    async for event in self._extract_spec_id_via_list(session, session_id):
+                        if event.get("type") == "_spec_id":
+                            spec_id = event.get("content")
+                        elif event.get("type") != "_collected_output":
+                            yield event
                 
                 if not spec_id:
                     yield {"type": "error", "content": "无法获取 OpenSpec ID，流程终止"}
@@ -720,13 +722,13 @@ class StreamingAgentService:
                 
                 # 步骤1: 执行 openspec list 提取 ID
                 yield {"type": "system", "content": "步骤 1/3: 获取 OpenSpec ID..."}
-                
-                spec_id = None
-                async for event in self._extract_spec_id_via_list(session, session_id):
-                    if event.get("type") == "_spec_id":
-                        spec_id = event.get("content")
-                    elif event.get("type") != "_collected_output":
-                        yield event
+
+                if not spec_id:
+                    async for event in self._extract_spec_id_via_list(session, session_id):
+                        if event.get("type") == "_spec_id":
+                            spec_id = event.get("content")
+                        elif event.get("type") != "_collected_output":
+                            yield event
                 
                 if not spec_id:
                     yield {"type": "error", "content": "无法获取 OpenSpec ID，流程终止"}
@@ -746,7 +748,7 @@ class StreamingAgentService:
                 # 步骤3: 执行 archive
                 yield {"type": "system", "content": "步骤 3/3: 执行 archive..."}
                 
-                archive_prompt = OpenSpecPromptBuilder.build_archive_prompt()
+                archive_prompt = OpenSpecPromptBuilder.build_archive_prompt(spec_id)
                 async for event in self._execute_single_query(session, archive_prompt, session_id):
                     if event.get("type") != "_collected_output":
                         yield event

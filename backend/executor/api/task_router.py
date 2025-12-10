@@ -38,6 +38,7 @@ class ExecuteRequest(BaseModel):
     model: Optional[str] = None
     task_type: Optional[str] = None  # "spec", "preview", "build"
     mcp_servers: Optional[dict] = None  # MCP server configurations
+    spec_id: Optional[str] = None
 
 
 class ExecuteResponse(BaseModel):
