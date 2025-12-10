@@ -577,6 +577,8 @@ class ModuleService:
                         spec_content, msg_list, result = await task
                         if spec_content:
                             yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'spec_content': spec_content, 'progress': 85})}\n\n"
+                            module_update = ModuleUpdate(spec_content=spec_content)
+                            module_repo.update_module(module_id=module.session_id, module_update=module_update)
                         else:
                             yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'error', 'message': 'Spec文档生成失败', 'spec_content': spec_content, 'progress': 85})}\n\n"
                         # 保存会话
