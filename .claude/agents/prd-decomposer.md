@@ -211,30 +211,29 @@
 - 检查PRD来源格式
 - 检查字段顺序是否符合模板
 
-**输出**:
-- `FEATURE_TREE.md` (人类可读)
-- `METADATA.json` (机器可读)
+**步骤8: 生成METADATA.json（必须执行）**
+- **必须**使用 `.claude/agents/validate_feature_tree.py` 生成METADATA.json
+- 该工具会自动验证FEATURE_TREE.md的完整性和格式
+- 如果验证失败，**必须**修正FEATURE_TREE.md中的错误
+- 验证通过后才会生成METADATA.json
 
-**⚠️ 重要 - 分批写入策略**:
-由于大文件可能导致Write工具调用失败，请采用以下策略：
-1. 先使用Write工具创建文件头部（总览部分，约500字符）
-2. 然后使用Bash工具的 `cat >> file << 'EOF'` 命令逐个追加每个功能模块的内容
-3. 每次追加的内容不超过2000字符
-4. 完成后使用Read工具验证文件内容完整
-
-示例追加命令：
+**生成命令**:
 ```bash
-cat >> docs/PRD-Gen/FEATURE_TREE.md << 'EOF'
-### L1: 功能模块内容...
-EOF
+cd .claude/agents
+python validate_feature_tree.py -i ../../docs/PRD-Gen/FEATURE_TREE.md
 ```
 
+**输出**:
+- `FEATURE_TREE.md` (人类可读)
+- `METADATA.json` (机器可读，由validate_feature_tree.py生成)
+
 **⚠️ 重要 - 分批写入策略**:
 由于大文件可能导致Write工具调用失败，请采用以下策略：
-1. 先使用Write工具创建文件头部（总览部分，约500字符）
+1. 先使用Write工具创建文件头部（系统信息+总览部分，约500字符）
 2. 然后使用Bash工具的 `cat >> file << 'EOF'` 命令逐个追加每个功能模块的内容
 3. 每次追加的内容不超过2000字符
 4. 完成后使用Read工具验证文件内容完整
+5. **最后必须运行validate_feature_tree.py验证并生成METADATA.json**
 
 示例追加命令：
 ```bash
@@ -331,14 +330,19 @@ EOF
 - 执行与初始生成模式相同的格式检查
 - 确保修改后的内容符合格式规范
 
-**步骤7: 输出修改说明**
+**步骤7: 生成METADATA.json（必须执行）**
+- **必须**使用 `.claude/agents/validate_feature_tree.py` 重新生成METADATA.json
+- 验证修改后的FEATURE_TREE.md是否符合格式要求
+- 如果验证失败，修正错误后重新运行
+
+**步骤8: 输出修改说明**
 - 列出本次修改的内容
 - 说明修改原因
 - 提示用户检查修改结果
 
 **输出**:
 - 更新后的 `FEATURE_TREE.md`
-- 更新后的 `METADATA.json`
+- 更新后的 `METADATA.json` (由validate_feature_tree.py生成)
 - 修改说明文档
 
 ### 迭代完善原则
@@ -384,7 +388,15 @@ EOF
 
 ### FEATURE_TREE.md
 
+**文件结构**:
+1. 系统信息（必须在最前面）
+2. 总览
+3. 详细结构
+
 **必填字段清单**:
+- [ ] 系统名称（中文）
+- [ ] 系统名称（英文）
+- [ ] 系统版本
 - [ ] 标题行: `#### LX: [名称] ([English Name]) [ID: kebab-case-id] [叶子]`（叶子节点必须标注）
 - [ ] 中文名称
 - [ ] 英文名称
@@ -409,6 +421,11 @@ EOF
 #### 小型系统格式 (L2为叶子)
 ```markdown
 # 功能树
+
+## 系统信息
+- 系统名称: HiperMATIC制造协同平台-问题管理模块
+- 系统英文名称: HiperMATIC Manufacturing Collaboration Platform - Problem Management Module
+- 系统版本: V1.0.0
 
 ## 总览
 - 总功能数: X
@@ -448,6 +465,11 @@ EOF
 #### 中型系统格式 (L3为叶子)
 ```markdown
 # 功能树
+
+## 系统信息
+- 系统名称: [系统中文名称]
+- 系统英文名称: [System English Name]
+- 系统版本: [版本号]
 
 ## 总览
 - 总功能数: X
@@ -494,51 +516,23 @@ EOF
 **注意**: 复杂度和耦合度只需给出评分和等级，不需要展示计算过程
 ```
 
-### METADATA.json
-```json
-{
-  "version": "1.0",
-  "generated_at": "YYYY-MM-DD HH:mm:ss",
-  "source_document": "[PRD文件名]",
-  "total_features": 0,
-  "l1_count": 0,
-  "l2_count": 0,
-  "l3_count": 0,
-  "l4_count": 0,
-  "leaf_count": 0,
-  "max_depth": 0,
-  "features": [
-    {
-      "id": "kebab-case-id",
-      "level": "L1|L2|L3|L4",
-      "name_zh": "[中文名称]",
-      "name_en": "[English Name]",
-      "url": "/path",
-      "complexity_score": 0,
-      "coupling_score": 0,
-      "is_leaf": false,
-      "operations": [
-        {
-          "name_zh": "列表查看",
-          "name_en": "List View",
-          "description": "查看所有记录的列表"
-        },
-        {
-          "name_zh": "新增",
-          "name_en": "Create",
-          "description": "创建新记录"
-        }
-      ],
-      "prd_source": {
-        "chapter": "[章节标题]",
-        "line_start": 0,
-        "line_end": 0
-      },
-      "children": []
-    }
-  ]
-}
+### METADATA.json 生成
+
+**重要**: METADATA.json **不应该手动编写**，必须通过 `.claude/agents/validate_feature_tree.py` 自动生成。
+
+该工具会：
+1. 读取并解析 FEATURE_TREE.md
+2. 验证文档结构和格式
+3. 验证总览部分的数量与实际解析的数量是否一致
+4. 自动生成符合规范的 METADATA.json
+
+**生成方法**:
+```bash
+cd .claude/agents
+python validate_feature_tree.py -i ../../docs/PRD-Gen/FEATURE_TREE.md
 ```
+
+如果验证失败，工具会提供详细的错误信息和修复建议。
 
 ## URL命名规范
 
@@ -725,14 +719,13 @@ L4: /{domain}/{category}/{subcategory}/{module}
 
 ---
 
-**版本**: 3.2
+**版本**: 3.3
 **更新**: 2025-12-11
 **主要变更**:
-- **新增迭代完善模式**: 支持基于已有功能树进行修改和完善
-- 新增工作模式判断机制：自动识别初始生成 vs 迭代完善
-- 新增8种迭代完善操作：调整层级、修改评分、添加/删除/合并/拆分节点、补充操作、修正来源
-- 新增迭代完善原则：保持一致性、最小化修改、保留历史、验证完整性、格式规范
-- 简化复杂度和耦合度输出格式：只显示评分和等级，不展示计算过程
-- 强化格式稳定性要求：新增"输出格式要求"章节
-- 新增"必填字段清单"和"格式检查点"
-- 更新质量标准：分为"内容完整性"和"格式规范性"两部分
+- **新增系统信息识别**: FEATURE_TREE.md必须包含系统名称（中英文）和版本信息
+- **强制使用validate_feature_tree.py**: METADATA.json必须通过验证工具生成，不允许手动编写
+- **移除METADATA.json手动生成示例**: 避免手动编写导致的格式不一致
+- **增强验证流程**: 验证工具会自动检查数量一致性和格式规范性
+- 更新输出格式模板：在最前面添加"系统信息"部分
+- 更新工作流程：增加步骤8（生成METADATA.json）
+- 更新迭代完善模式：增加步骤7（重新生成METADATA.json）
