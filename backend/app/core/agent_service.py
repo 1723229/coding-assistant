@@ -455,19 +455,50 @@ class AgentService:
             self,
             prompt: str,
             session_id: str,
+            task_type: str
     ) -> AsyncGenerator[ChatMessage, None]:
         """
         Execute a chat with streaming response.
 
         Args:
-            prompt: User prompt/query
+            prompt: User prompt/query, format varies by task_type
             session_id: Unique session identifier for multi-turn conversation
                        Workspace will be created at: {user_home}/workspace/{session_id}
+            task_type: Task type identifier, determines how prompt is processed:
+                - "prd-decompose": PRD decomposition task
+                    - prompt: PRD file absolute path
+                    - Example: "/{user_home}/{session_id}/prd.md"
+                    - Internally converted to: "/prd-decompose {prompt}"
+                
+                - "analyze-prd": PRD module analysis task
+                    - prompt: Command line arguments string
+                    - Format: --module "模块名" --feature-tree "功能树路径" --prd "PRD路径"
+                    - Example: --module "D1组建团队" --feature-tree "/{user_home}/{session_id}/FEATURE_TREE.md" --prd "/{user_home}/{session_id}/prd.md"
+                    - Internally converted to: "/analyze-prd {prompt}"
+                
+                - "prd-change": PRD modification task (requires consistent session_id)
+                    - prompt: User review and change request
+                    - Format: User Review on "选中的内容", msg: "提出的需求"
+                    - Example: User Review on "用户登录模块", msg: "增加OAuth2.0支持"
+                    - Prompt passed through unchanged
+                
+                - Other/default: General chat task
+                    - prompt: Free-form user query
+                    - Prompt passed through unchanged
 
         Yields:
             ChatMessage objects for each response chunk
         """
         try:
+            logger.info(f"Chat request prompt: {prompt}")
+            if task_type == "prd-decompose":
+                prompt = f"/prd-decompose {prompt}"
+            elif task_type == "analyze-prd":
+                prompt = f"/analyze-prd {prompt}"
+            elif task_type == "prd-change":
+                prompt = prompt
+            logger.info(f"Chat final prompt: {prompt}")
+
             # Get or create session
             session = await self._get_or_create_session(session_id=session_id)
 
@@ -539,6 +570,7 @@ class AgentService:
             self,
             prompt: str,
             session_id: str,
+            task_type: str,
     ) -> List[ChatMessage]:
         """
         Execute a chat and return all responses (non-streaming).
@@ -552,7 +584,7 @@ class AgentService:
             List of ChatMessage objects
         """
         messages = []
-        async for msg in self.chat_stream(prompt=prompt, session_id=session_id):
+        async for msg in self.chat_stream(prompt=prompt, session_id=session_id, task_type=task_type):
             messages.append(msg)
         return messages
 
