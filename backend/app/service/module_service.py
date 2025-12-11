@@ -9,9 +9,10 @@ import uuid
 import logging
 import json
 import asyncio
+import tempfile
 from typing import Optional, AsyncGenerator
 from pathlib import Path
-from fastapi import Query
+from fastapi import Query, UploadFile
 
 from app.api.chat_router import module_repo
 from app.config.logging_config import log_print
@@ -1143,4 +1144,147 @@ class ModuleService:
             logger.error(f"Optimization stream failed: {e}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'message': f'优化失败: {str(e)}'}, ensure_ascii=False)}\n\n"
 
+    async def _convert_file_to_markdown(self, file: UploadFile, temp_path: Path) -> str:
+        """
+        将上传的文件转换为Markdown格式
+
+        Args:
+            file: 上传的文件对象
+            temp_path: 临时文件路径
+
+        Returns:
+            转换后的Markdown内容
+
+        Raises:
+            ValueError: 不支持的文件格式
+        """
+        file_ext = temp_path.suffix.lower()
+
+        try:
+            if file_ext == '.md':
+                # Markdown文件直接读取
+                content = temp_path.read_text(encoding='utf-8')
+                return content
+
+            elif file_ext == '.txt':
+                # 纯文本文件直接读取
+                content = temp_path.read_text(encoding='utf-8')
+                return content
+
+            elif file_ext == '.docx':
+                # Word文档转换为Markdown
+                try:
+                    from docx import Document
+                except ImportError:
+                    raise ValueError("需要安装 python-docx 库来处理 .docx 文件。请运行: pip install python-docx")
+
+                doc = Document(temp_path)
+                markdown_lines = []
+
+                for para in doc.paragraphs:
+                    text = para.text.strip()
+                    if not text:
+                        markdown_lines.append("")
+                        continue
+
+                    # 根据样式转换为Markdown
+                    style_name = para.style.name.lower()
+
+                    if 'heading 1' in style_name:
+                        markdown_lines.append(f"# {text}")
+                    elif 'heading 2' in style_name:
+                        markdown_lines.append(f"## {text}")
+                    elif 'heading 3' in style_name:
+                        markdown_lines.append(f"### {text}")
+                    elif 'heading 4' in style_name:
+                        markdown_lines.append(f"#### {text}")
+                    elif 'heading 5' in style_name:
+                        markdown_lines.append(f"##### {text}")
+                    elif 'heading 6' in style_name:
+                        markdown_lines.append(f"###### {text}")
+                    else:
+                        markdown_lines.append(text)
+
+                # 处理表格
+                for table in doc.tables:
+                    markdown_lines.append("")
+                    for i, row in enumerate(table.rows):
+                        cells = [cell.text.strip() for cell in row.cells]
+                        markdown_lines.append("| " + " | ".join(cells) + " |")
+                        if i == 0:
+                            # 添加表头分隔符
+                            markdown_lines.append("| " + " | ".join(["---"] * len(cells)) + " |")
+                    markdown_lines.append("")
+
+                return "\n".join(markdown_lines)
+
+            else:
+                raise ValueError(f"不支持的文件格式: {file_ext}。支持的格式: .docx, .md, .txt")
+
+        except Exception as e:
+            logger.error(f"文件转换失败: {e}", exc_info=True)
+            raise
+
+    async def upload_file_and_create_module_stream(
+        self,
+        file: UploadFile,
+    ) -> AsyncGenerator[str, None]:
+        """
+        上传文件并流式创建模块
+
+        流程：
+        1. 接收文件上传
+        2. 根据文件类型转换为Markdown
+        3. 使用文件内容作为需求描述
+
+        Args:
+            file: 上传的文件
+
+        Yields:
+            SSE格式的事件消息
+        """
+        temp_file_path = None
+
+        try:
+            # 发送连接确认
+            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+            await asyncio.sleep(0)
+
+            # 步骤1: 保存上传的文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'upload_file', 'status': 'progress', 'message': '正在接收文件...', 'progress': 5}, ensure_ascii=False)}\n\n"
+
+            # 创建临时文件
+            file_ext = Path(file.filename).suffix
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
+                temp_file_path = Path(temp_file.name)
+                content = await file.read()
+                temp_file.write(content)
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'upload_file', 'status': 'success', 'message': f'文件接收成功: {file.filename}', 'progress': 10}, ensure_ascii=False)}\n\n"
+
+            # 步骤2: 转换文件为Markdown
+            yield f"data: {json.dumps({'type': 'step', 'step': 'convert_file', 'status': 'progress', 'message': '正在转换文件格式...', 'progress': 15}, ensure_ascii=False)}\n\n"
+
+            try:
+                markdown_content = await self._convert_file_to_markdown(file, temp_file_path)
+                yield f"data: {json.dumps({'type': 'step', 'step': 'convert_file', 'status': 'success', 'message': '文件转换成功', 'progress': 20}, ensure_ascii=False)}\n\n"
+            except ValueError as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+                return
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'文件转换失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+        except Exception as e:
+            logger.error(f"Upload and create module stream failed: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+
+        finally:
+            # 清理临时文件
+            if temp_file_path and temp_file_path.exists():
+                try:
+                    temp_file_path.unlink()
+                    logger.info(f"Temporary file deleted: {temp_file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete temporary file: {e}")
 
