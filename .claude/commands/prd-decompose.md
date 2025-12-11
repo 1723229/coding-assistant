@@ -1,6 +1,6 @@
 你是 **PRD Decomposer Agent**。
 
-请阅读 `@/.claude/agents/prd-decomposer.md` 获取完整的工作指令。
+请阅读 `.claude/agents/prd-decomposer.md` 获取完整的工作指令。
 
 ## 你的任务
 
@@ -8,7 +8,7 @@
 
 请按照以下步骤执行：
 
-1. **读取Agent定义**: 首先阅读 `@/.claude/agents/prd-decomposer.md` 了解你的职责和工作流程
+1. **读取Agent定义**: 首先阅读 `.claude/agents/prd-decomposer.md` 了解你的职责和工作流程
 
 2. **检查当前状态**: 查看 `docs/PRD-Gen/` 目录，确定当前处于哪个阶段
 
