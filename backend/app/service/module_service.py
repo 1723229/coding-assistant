@@ -4,7 +4,7 @@ Module Service
 业务逻辑层 - Module operations with tree structure support
 POINT type modules create sessions and manage workspaces
 """
-
+import os
 import uuid
 import logging
 import json
@@ -1228,17 +1228,22 @@ class ModuleService:
     async def upload_file_and_create_module_stream(
         self,
         file: UploadFile,
+        session_id: str
     ) -> AsyncGenerator[str, None]:
         """
-        上传文件并流式创建模块
+        上传文件并流式处理PRD分解任务
 
         流程：
         1. 接收文件上传
         2. 根据文件类型转换为Markdown
-        3. 使用文件内容作为需求描述
+        3. 保存到 workspace/{session_id}/prd.md
+        4. 调用 chat_stream 进行 prd-decompose 任务
+        5. 读取生成的 FEATURE_TREE.md 和 METADATA.json
+        6. 返回给前端
 
         Args:
             file: 上传的文件
+            session_id: 会话ID
 
         Yields:
             SSE格式的事件消息
@@ -1250,8 +1255,18 @@ class ModuleService:
             yield f"data: {json.dumps({'type': 'connected'})}\n\n"
             await asyncio.sleep(0)
 
-            # 步骤1: 保存上传的文件
-            yield f"data: {json.dumps({'type': 'step', 'step': 'upload_file', 'status': 'progress', 'message': '正在接收文件...', 'progress': 5}, ensure_ascii=False)}\n\n"
+            # 步骤1: 准备工作空间路径
+            yield f"data: {json.dumps({'type': 'step', 'step': 'prepare_workspace', 'status': 'progress', 'message': '准备工作空间...', 'progress': 5}, ensure_ascii=False)}\n\n"
+
+            # 构建workspace路径: settings.workspace_base_path / session_id
+            workspace_dir = Path.home() / "workspace" / session_id
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            workspace_path = str(workspace_dir.absolute())
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'prepare_workspace', 'status': 'success', 'message': f'工作空间: {workspace_path}', 'progress': 10}, ensure_ascii=False)}\n\n"
+
+            # 步骤2: 接收并保存文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'upload_file', 'status': 'progress', 'message': '正在接收文件...', 'progress': 15}, ensure_ascii=False)}\n\n"
 
             # 创建临时文件
             file_ext = Path(file.filename).suffix
@@ -1260,14 +1275,22 @@ class ModuleService:
                 content = await file.read()
                 temp_file.write(content)
 
-            yield f"data: {json.dumps({'type': 'step', 'step': 'upload_file', 'status': 'success', 'message': f'文件接收成功: {file.filename}', 'progress': 10}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'step', 'step': 'upload_file', 'status': 'success', 'message': f'文件接收成功: {file.filename}', 'progress': 20}, ensure_ascii=False)}\n\n"
 
-            # 步骤2: 转换文件为Markdown
-            yield f"data: {json.dumps({'type': 'step', 'step': 'convert_file', 'status': 'progress', 'message': '正在转换文件格式...', 'progress': 15}, ensure_ascii=False)}\n\n"
+            # 步骤3: 转换文件为Markdown
+            yield f"data: {json.dumps({'type': 'step', 'step': 'convert_file', 'status': 'progress', 'message': '正在转换文件格式...', 'progress': 25}, ensure_ascii=False)}\n\n"
 
             try:
                 markdown_content = await self._convert_file_to_markdown(file, temp_file_path)
-                yield f"data: {json.dumps({'type': 'step', 'step': 'convert_file', 'status': 'success', 'message': '文件转换成功', 'progress': 20}, ensure_ascii=False)}\n\n"
+
+                # 保存到 workspace/{session_id}/prd.md
+                prd_file_path = workspace_dir / "prd.md"
+
+                with open(prd_file_path, "w", encoding="utf-8") as f:
+                    f.write(markdown_content)
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'convert_file', 'status': 'success', 'message': f'文件已保存到: {prd_file_path}', 'progress': 30}, ensure_ascii=False)}\n\n"
+
             except ValueError as e:
                 yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
                 return
@@ -1275,8 +1298,105 @@ class ModuleService:
                 yield f"data: {json.dumps({'type': 'error', 'message': f'文件转换失败: {str(e)}'}, ensure_ascii=False)}\n\n"
                 return
 
+            # 步骤4: 调用 chat_stream 进行 prd-decompose 任务
+            yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'progress', 'message': '开始PRD分解任务...', 'progress': 35}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 获取沙箱服务
+                sandbox_service = await session_manager.get_service(
+                    session_id=session_id,
+                    workspace_path=workspace_path,
+                )
+
+                # 调用 chat_stream，传入 prd.md 的绝对路径和 task_type
+                prompt = str(prd_file_path.absolute())
+
+                logger.info(f"Starting prd-decompose task: session_id={session_id}, prompt={prompt}")
+
+                # 流式处理 prd-decompose 任务
+                async for chat_msg in sandbox_service.chat_stream(
+                    prompt=prompt,
+                    session_id=session_id,
+                    task_type="prd-decompose",
+                ):
+                    # 转发 chat 消息作为进度更新
+                    msg_dict = chat_msg.to_dict()
+
+                    # 根据消息类型调整进度展示
+                    if chat_msg.type in ("text", "text_delta"):
+                        # 文本消息，显示为 prd_decompose 进度（35-80%）
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'progress', 'message': chat_msg.content[:100], 'progress': 50}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "tool_use":
+                        # 工具调用
+                        tool_name = msg_dict.get('tool_name', 'unknown')
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'progress', 'message': f'正在执行: {tool_name}', 'progress': 60}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "error":
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'PRD分解失败: {chat_msg.content}'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    await asyncio.sleep(0.01)
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'success', 'message': 'PRD分解任务完成', 'progress': 80}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"PRD decompose failed: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'PRD分解失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤5: 读取生成的文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'read_results', 'status': 'progress', 'message': '读取生成的文件...', 'progress': 85}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 根据文档，生成的文件路径为: {workspace_path}/docs/PRD-GEN/
+                prd_gen_dir = workspace_dir / "docs" / "PRD-GEN"
+                feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
+                metadata_path = prd_gen_dir / "METADATA.json"
+
+                # 检查文件是否存在
+                if not feature_tree_path.exists():
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'未找到文件: {feature_tree_path}'}, ensure_ascii=False)}\n\n"
+                    return
+
+                if not metadata_path.exists():
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'未找到文件: {metadata_path}'}, ensure_ascii=False)}\n\n"
+                    return
+
+                # 读取文件内容
+                feature_tree_content = feature_tree_path.read_text(encoding='utf-8')
+                metadata_content = metadata_path.read_text(encoding='utf-8')
+
+                # 解析 JSON
+                try:
+                    metadata_json = json.loads(metadata_content)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse METADATA.json: {e}")
+                    metadata_json = {"error": "Invalid JSON format"}
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'read_results', 'status': 'success', 'message': '文件读取成功', 'progress': 95}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"Failed to read generated files: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'读取生成文件失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤6: 返回结果
+            result_data = {
+                'type': 'complete',
+                'message': 'PRD处理完成',
+                'progress': 100,
+                'data': {
+                    'feature_tree': feature_tree_content,
+                    'metadata': metadata_json,
+                    'prd_path': str(prd_file_path.absolute()),
+                    'feature_tree_path': str(feature_tree_path.absolute()),
+                    'metadata_path': str(metadata_path.absolute()),
+                }
+            }
+
+            yield f"data: {json.dumps(result_data, ensure_ascii=False)}\n\n"
+
         except Exception as e:
-            logger.error(f"Upload and create module stream failed: {e}", exc_info=True)
+            logger.error(f"Upload and PRD decompose failed: {e}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)}'}, ensure_ascii=False)}\n\n"
 
         finally:
@@ -1287,4 +1407,159 @@ class ModuleService:
                     logger.info(f"Temporary file deleted: {temp_file_path}")
                 except Exception as e:
                     logger.warning(f"Failed to delete temporary file: {e}")
+
+    async def prd_change_stream(
+        self,
+        session_id: str,
+        selected_content: str,
+        msg: str,
+    ) -> AsyncGenerator[str, None]:
+        """
+        PRD 修改任务（流式）
+
+        根据用户反馈修改已有的 PRD 内容
+
+        流程：
+        1. 验证 session_id 对应的目录和文件是否存在
+        2. 构建 prompt: User Review on "{selected_content}", msg: "{msg}"
+        3. 调用 chat_stream 进行 prd-change 任务
+        4. 读取更新后的 FEATURE_TREE.md 和 METADATA.json
+        5. 返回给前端
+
+        Args:
+            session_id: 会话ID（必须与原始PRD的session_id一致）
+            selected_content: 选中的内容
+            msg: 提出的需求
+
+        Yields:
+            SSE格式的事件消息
+        """
+        try:
+            # 发送连接确认
+            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+            await asyncio.sleep(0)
+
+            # 步骤1: 验证 session_id 和文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_session', 'status': 'progress', 'message': '验证会话和文件...', 'progress': 5}, ensure_ascii=False)}\n\n"
+
+            # 构建workspace路径
+            workspace_dir = Path.home() / "workspace" / session_id
+
+            # 检查目录是否存在
+            if not workspace_dir.exists():
+                yield f"data: {json.dumps({'type': 'error', 'message': f'会话 {session_id} 对应的工作空间不存在'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 检查必要文件是否存在
+            prd_file_path = workspace_dir / "prd.md"
+            prd_gen_dir = workspace_dir / "docs" / "PRD-GEN"
+            feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
+            metadata_path = prd_gen_dir / "METADATA.json"
+
+            missing_files = []
+            if not prd_file_path.exists():
+                missing_files.append("prd.md")
+            if not feature_tree_path.exists():
+                missing_files.append("FEATURE_TREE.md")
+            if not metadata_path.exists():
+                missing_files.append("METADATA.json")
+
+            if missing_files:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'缺少必要文件: {', '.join(missing_files)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            workspace_path = str(workspace_dir.absolute())
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_session', 'status': 'success', 'message': '会话和文件验证成功', 'progress': 10}, ensure_ascii=False)}\n\n"
+
+            # 步骤2: 构建 prompt
+            yield f"data: {json.dumps({'type': 'step', 'step': 'build_prompt', 'status': 'progress', 'message': '构建请求...', 'progress': 15}, ensure_ascii=False)}\n\n"
+
+            # 按照规范构建 prompt: User Review on "选中的内容", msg: "提出的需求"
+            prompt = f'User Review on "{selected_content}", msg: "{msg}"'
+
+            logger.info(f"PRD change prompt: {prompt}")
+            yield f"data: {json.dumps({'type': 'step', 'step': 'build_prompt', 'status': 'success', 'message': 'Prompt 构建完成', 'progress': 20}, ensure_ascii=False)}\n\n"
+
+            # 步骤3: 调用 chat_stream 进行 prd-change 任务
+            yield f"data: {json.dumps({'type': 'step', 'step': 'prd_change', 'status': 'progress', 'message': '开始PRD修改任务...', 'progress': 25}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 获取沙箱服务
+                sandbox_service = await session_manager.get_service(
+                    session_id=session_id,
+                    workspace_path=workspace_path,
+                )
+
+                logger.info(f"Starting prd-change task: session_id={session_id}, prompt={prompt}")
+
+                # 流式处理 prd-change 任务
+                async for chat_msg in sandbox_service.chat_stream(
+                    prompt=prompt,
+                    session_id=session_id,
+                    task_type="prd-change",
+                ):
+                    # 转发 chat 消息作为进度更新
+                    msg_dict = chat_msg.to_dict()
+
+                    # 根据消息类型调整进度展示
+                    if chat_msg.type in ("text", "text_delta"):
+                        # 文本消息，显示为 prd_change 进度（25-75%）
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_change', 'status': 'progress', 'message': chat_msg.content[:100], 'progress': 50}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "tool_use":
+                        # 工具调用
+                        tool_name = msg_dict.get('tool_name', 'unknown')
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_change', 'status': 'progress', 'message': f'正在执行: {tool_name}', 'progress': 60}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "error":
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'PRD修改失败: {chat_msg.content}'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    await asyncio.sleep(0.01)
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'prd_change', 'status': 'success', 'message': 'PRD修改任务完成', 'progress': 75}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"PRD change failed: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'PRD修改失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤4: 读取更新后的文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'read_results', 'status': 'progress', 'message': '读取更新后的文件...', 'progress': 85}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 重新读取文件内容（已经被更新）
+                feature_tree_content = feature_tree_path.read_text(encoding='utf-8')
+                metadata_content = metadata_path.read_text(encoding='utf-8')
+
+                # 解析 JSON
+                try:
+                    metadata_json = json.loads(metadata_content)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse METADATA.json: {e}")
+                    metadata_json = {"error": "Invalid JSON format"}
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'read_results', 'status': 'success', 'message': '文件读取成功', 'progress': 95}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"Failed to read updated files: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'读取更新文件失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤5: 返回结果
+            result_data = {
+                'type': 'complete',
+                'message': 'PRD修改完成',
+                'progress': 100,
+                'data': {
+                    'feature_tree': feature_tree_content,
+                    'metadata': metadata_json,
+                    'feature_tree_path': str(feature_tree_path.absolute()),
+                    'metadata_path': str(metadata_path.absolute()),
+                }
+            }
+
+            yield f"data: {json.dumps(result_data, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"PRD change stream failed: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)}'}, ensure_ascii=False)}\n\n"
 

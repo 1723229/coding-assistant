@@ -255,10 +255,11 @@ async def restart_module_container(
     operation_id="upload_file_stream"
 )
 async def upload_file_stream(
-    file: UploadFile = File(..., description="上传的文件（支持 .docx, .md,）")
+    file: UploadFile = File(..., description="上传的文件（支持 .docx, .md）"),
+    session_id: str = Query(..., description="会话ID"),
 ):
     """
-    上传文件并流式创建模块
+    上传文件并流式处理PRD分解任务
 
     支持的文件格式：
     - .docx: Word文档，自动转换为Markdown
@@ -268,18 +269,73 @@ async def upload_file_stream(
     流程：
     1. 接收文件上传
     2. 根据文件类型转换为Markdown
-    3. 使用文件内容作为需求描述
-    4. 流式创建POINT类型模块
+    3. 保存到 workspace/{session_id}/prd.md
+    4. 调用 chat_stream 进行 prd-decompose 任务
+    5. 读取生成的 FEATURE_TREE.md 和 METADATA.json
+    6. 返回给前端
 
     事件类型：
     - connected: 连接建立
     - step: 步骤进度更新
     - error: 错误信息
-    - complete: 创建完成
+    - complete: 处理完成，包含 feature_tree 和 metadata
     """
     return StreamingResponse(
         module_service.upload_file_and_create_module_stream(
             file=file,
+            session_id=session_id
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+@module_router.post(
+    "/prd/change/stream",
+    summary="PRD修改任务（流式）",
+    operation_id="prd_change_stream"
+)
+async def prd_change_stream(
+    session_id: str = Query(..., description="会话ID（必须与原始PRD相同）"),
+    selected_content: str = Query(..., description="选中的内容"),
+    msg: str = Query(..., description="提出的需求"),
+):
+    """
+    PRD修改任务（流式）
+
+    根据用户反馈修改已有的 PRD 内容
+
+    **重要**: 必须使用与原始 PRD 相同的 session_id
+
+    Prompt 格式: User Review on "{selected_content}", msg: "{msg}"
+
+    流程：
+    1. 验证 session_id 对应的目录和文件是否存在
+    2. 构建 prompt
+    3. 调用 chat_stream 进行 prd-change 任务
+    4. 读取更新后的 FEATURE_TREE.md 和 METADATA.json
+    5. 返回给前端
+
+    事件类型：
+    - connected: 连接建立
+    - step: 步骤进度更新
+    - error: 错误信息（包括 session_id 错误或文件缺失）
+    - complete: 处理完成，包含更新后的 feature_tree 和 metadata
+
+    示例:
+    - session_id: "abc123"
+    - selected_content: "用户登录模块"
+    - msg: "增加OAuth2.0第三方登录支持"
+    """
+    return StreamingResponse(
+        module_service.prd_change_stream(
+            session_id=session_id,
+            selected_content=selected_content,
+            msg=msg,
         ),
         media_type="text/event-stream",
         headers={
