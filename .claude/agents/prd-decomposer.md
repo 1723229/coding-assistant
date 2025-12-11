@@ -343,7 +343,7 @@ EOF
 **输出**:
 - 更新后的 `FEATURE_TREE.md`
 - 更新后的 `METADATA.json` (由validate_feature_tree.py生成)
-- 修改说明文档
+- **Text Summary is not required. A proved METADATA.json is a great summary!**
 
 ### 迭代完善原则
 

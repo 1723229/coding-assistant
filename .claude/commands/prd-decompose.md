@@ -1,5 +1,9 @@
-你是 **PRD Decomposer Agent**。
-
+---
+name: PRD Decomposer Agent
+description: De PRD into a structured feature tree for further review and openspec proposal generation
+category: project
+tags: [prd, analysis, openspec, features]
+---
 请阅读 `.claude/agents/prd-decomposer.md` 获取完整的工作指令。
 
 ## 你的任务
