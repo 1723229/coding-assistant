@@ -495,6 +495,8 @@ class AgentService:
                 prompt = f"/prd-decompose {prompt}"
             elif task_type == "analyze-prd":
                 prompt = f"/analyze-prd {prompt}"
+            elif task_type == "confirm-prd":
+                prompt = f"内容已确认，请进行审阅，校验是否满足格式要求，只需要校验格式即可"
             elif task_type == "prd-change":
                 prompt = prompt
             logger.info(f"Chat final prompt: {prompt}")

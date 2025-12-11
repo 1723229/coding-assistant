@@ -37,9 +37,36 @@ task_type = "prd-decompose"
 
 **输出**:/{user_home}/workspace/{session_id}/docs/PRD-gen/目录下，生成 `FEATURE_TREE.md` 功能树文件、`METADATA.json` 功能树结构文件
 
+
 ---
 
-### 2. `analyze-prd` - PRD 模块分析任务
+
+### 2. `confirm-prd` - PRD 审阅确认
+
+**用途**: 用户已确认PRD修改完成，进行确认
+
+**重要**: 必须使用与原始 PRD 相同的 `session_id`，以保持上下文一致性
+
+**Prompt 格式**: 无
+
+**格式规范**:
+```
+
+```
+
+**示例**:
+```python
+prompt = ''
+session_id = "abc123"  # 必须与原始PRD的session_id一致
+task_type = "confirm-prd"
+```
+
+**输出**: 更新后的 `FEATURE_TREE.md` 功能树文件、`METADATA.json` 功能树结构文件
+
+---
+
+
+### 3. `analyze-prd` - PRD 模块分析任务
 
 **用途**: 分析 PRD 中的特定功能模块，生成详细的模块设计文档，每次的session_id唯一，避免功能模块冲突
 
@@ -68,7 +95,7 @@ task_type = "analyze-prd"
 
 ---
 
-### 3. `prd-change` - PRD 修改任务
+### 4. `prd-change` - PRD 修改任务
 
 **用途**: 根据用户反馈修改已有的 PRD 内容
 
@@ -94,7 +121,7 @@ task_type = "prd-change"
 
 ---
 
-### 4. 默认/其他 - 通用对话任务
+### 5. 默认/其他 - 通用对话任务
 
 **用途**: 一般性的对话交互，不涉及特定的 PRD 操作
 

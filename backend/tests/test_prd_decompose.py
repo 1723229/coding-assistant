@@ -48,11 +48,13 @@ async def test_prd_decompose():
         logger.error(f"File not found: {file_path}")
         return False
     
-    # Prompt for PRD decompose with absolute path
-    prompt = f"/prd-decompose {file_path}"
+    # Prompt is just the file path (task_type handles the conversion)
+    prompt = file_path
+    task_type = "prd-decompose"
     
     logger.info("=" * 60)
-    logger.info(f"Executing:cla {prompt}")
+    logger.info(f"Executing: task_type={task_type}, prompt={prompt}")
+    logger.info(f"Internal conversion: /prd-decompose {prompt}")
     logger.info("=" * 60)
     
     try:
@@ -62,6 +64,7 @@ async def test_prd_decompose():
         async for msg in agent_service.chat_stream(
             prompt=prompt,
             session_id=session_id,
+            task_type=task_type,
         ):
             print(f"msg:------{msg}")
             message_count += 1
