@@ -5,10 +5,18 @@ Module API Router
 支持 NODE 和 POINT 类型，POINT 类型管理 workspace 和容器
 """
 
-from fastapi import APIRouter, Query, Path
+import os
+import uuid
+import json
+import asyncio
+import logging
+from pathlib import Path as FilePath
+from fastapi import APIRouter, Query, Path, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 from app.service.module_service import ModuleService
 from app.db.schemas import ModuleCreate, ModuleUpdate
+
+logger = logging.getLogger(__name__)
 
 # 创建路由器
 module_router = APIRouter(prefix="/modules", tags=["modules"])
@@ -239,3 +247,44 @@ async def restart_module_container(
     用于解决容器故障或应用环境配置变更后的重启需求
     """
     return await module_service.restart_module_container(module_id)
+
+
+@module_router.post(
+    "/upload/stream",
+    summary="上传文件并流式处理（创建模块）",
+    operation_id="upload_file_stream"
+)
+async def upload_file_stream(
+    file: UploadFile = File(..., description="上传的文件（支持 .docx, .md,）")
+):
+    """
+    上传文件并流式创建模块
+
+    支持的文件格式：
+    - .docx: Word文档，自动转换为Markdown
+    - .md: Markdown文件
+    - .txt: 纯文本文件
+
+    流程：
+    1. 接收文件上传
+    2. 根据文件类型转换为Markdown
+    3. 使用文件内容作为需求描述
+    4. 流式创建POINT类型模块
+
+    事件类型：
+    - connected: 连接建立
+    - step: 步骤进度更新
+    - error: 错误信息
+    - complete: 创建完成
+    """
+    return StreamingResponse(
+        module_service.upload_file_and_create_module_stream(
+            file=file,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
