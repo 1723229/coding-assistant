@@ -385,6 +385,10 @@ class AgentService:
                         "content": block.thinking,
                     })
                 elif isinstance(block, ToolUseBlock):
+                    # Debug: log the raw tool input
+                    logger.debug(f"ToolUseBlock: name={block.name}, id={block.id}, input_type={type(block.input)}, input={str(block.input)[:500]}")
+                    if block.name == "Write" and (not block.input or not block.input.get("file_path")):
+                        logger.warning(f"Empty or invalid Write tool input detected: {block.input}")
                     events.append({
                         "type": "tool_use",
                         "content": f"Using tool: {block.name}",

@@ -13,6 +13,9 @@ import os
 import sys
 import uuid
 
+os.environ["ANTHROPIC_API_KEY"] = "sk-TJEkNlNoEZHOElwi7u1j2XTE9opsSXbbaqPCRufNPiGDc4VL"
+os.environ["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
+
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -49,7 +52,7 @@ async def test_prd_decompose():
     prompt = f"/prd-decompose {file_path}"
     
     logger.info("=" * 60)
-    logger.info(f"Executing: {prompt}")
+    logger.info(f"Executing:cla {prompt}")
     logger.info("=" * 60)
     
     try:
@@ -60,11 +63,12 @@ async def test_prd_decompose():
             prompt=prompt,
             session_id=session_id,
         ):
+            print(f"msg:------{msg}")
             message_count += 1
             
             # Output based on message type
             if msg.type == "system":
-                logger.info(f"[SYSTEM] {msg.content[:100] if msg.content else ''}...")
+                logger.info(f"[SYSTEM] {msg.content if msg.content else ''}...")
             elif msg.type == "text_delta":
                 print(msg.content, end="", flush=True)
                 text_buffer.append(msg.content)
@@ -72,11 +76,11 @@ async def test_prd_decompose():
                 if msg.content and msg.content not in ''.join(text_buffer):
                     print(msg.content, end="", flush=True)
             elif msg.type == "tool_use":
-                logger.info(f"\n[TOOL] {msg.tool_name}: {str(msg.tool_input)[:200] if msg.tool_input else ''}...")
+                logger.info(f"\n[TOOL] {msg.tool_name}: {str(msg.tool_input) if msg.tool_input else ''}...")
             elif msg.type == "tool_result":
-                logger.info(f"[TOOL_RESULT] {msg.content[:200] if msg.content else ''}...")
+                logger.info(f"[TOOL_RESULT] {msg if msg.content else ''}...")
             elif msg.type == "thinking":
-                logger.info(f"[THINKING] {msg.content[:100] if msg.content else ''}...")
+                logger.info(f"[THINKING] {msg if msg.content else ''}...")
             elif msg.type == "result":
                 print()
                 logger.info(f"[RESULT] Duration: {msg.metadata.get('duration_ms', 0)}ms, "
