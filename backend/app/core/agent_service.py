@@ -32,19 +32,11 @@ from claude_agent_sdk import (
 
 logger = logging.getLogger(__name__)
 
-# Default workspace root - use project workspaces directory or /tmp as fallback
+# Default workspace root - use user home directory
 def _get_default_workspace_root() -> str:
-    """Get default workspace root directory."""
-    # Try to use project's workspace config first
-    try:
-        from app.config import WorkspaceConfig
-        return str(WorkspaceConfig.BASE_PATH)
-    except ImportError:
-        pass
-    
-    # Fallback to /tmp/workspaces for local development
-    import tempfile
-    return os.path.join(tempfile.gettempdir(), "workspaces")
+    """Get default workspace root directory: {user_home}/workspace"""
+    user_home = os.path.expanduser("~")
+    return os.path.join(user_home, "workspace")
 
 DEFAULT_WORKSPACE_ROOT = _get_default_workspace_root()
 
@@ -132,38 +124,38 @@ class AgentService:
         try:
             from app.config import ExecutorConfig
             if ExecutorConfig.ANTHROPIC_API_KEY:
-                os.environ.setdefault("ANTHROPIC_API_KEY", ExecutorConfig.ANTHROPIC_API_KEY)
+                os.environ["ANTHROPIC_API_KEY"] = ExecutorConfig.ANTHROPIC_API_KEY
             if ExecutorConfig.ANTHROPIC_BASE_URL:
-                os.environ.setdefault("ANTHROPIC_BASE_URL", ExecutorConfig.ANTHROPIC_BASE_URL)
-            self._model = ExecutorConfig.ANTHROPIC_MODEL or "claude-sonnet-4-20250514"
+                os.environ["ANTHROPIC_BASE_URL"] = ExecutorConfig.ANTHROPIC_BASE_URL
+            if ExecutorConfig.ANTHROPIC_MODEL:
+                os.environ["ANTHROPIC_MODEL"] = ExecutorConfig.ANTHROPIC_MODEL
             self._permission_mode = DEFAULT_PERMISSION_MODE
-            logger.info(f"Loaded config: model={self._model}")
+            
+            # Log environment variables for debugging
+            logger.info(f"Environment configured:")
+            logger.info(f"  ANTHROPIC_API_KEY: {os.environ.get('ANTHROPIC_API_KEY', '')[:20]}...")
+            logger.info(f"  ANTHROPIC_BASE_URL: {os.environ.get('ANTHROPIC_BASE_URL', '')}")
+            logger.info(f"  ANTHROPIC_MODEL: {os.environ.get('ANTHROPIC_MODEL', '')}")
         except ImportError:
-            self._model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
             self._permission_mode = DEFAULT_PERMISSION_MODE
-            logger.info(f"Using env config: model={self._model}")
+            logger.warning("ExecutorConfig not available, using environment variables")
 
         # Disable experimental betas for API proxy compatibility
         os.environ.setdefault("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "1")
 
-    def _get_workspace_path(self, session_id: str, workspace_path: Optional[str] = None) -> str:
+    def _get_workspace_path(self, session_id: str) -> str:
         """
         Get workspace path for a session.
 
+        Workspace path is always: {user_home}/workspace/{session_id}
+
         Args:
             session_id: Session identifier
-            workspace_path: Optional custom workspace path
 
         Returns:
             Absolute workspace path (created if not exists)
         """
-        if workspace_path:
-            path = workspace_path
-        else:
-            path = os.path.join(DEFAULT_WORKSPACE_ROOT, session_id)
-
-        # Convert to absolute path (Claude SDK requires absolute paths)
-        path = os.path.abspath(path)
+        path = os.path.join(DEFAULT_WORKSPACE_ROOT, session_id)
 
         # Ensure directory exists
         is_new_workspace = not os.path.exists(path)
@@ -178,30 +170,23 @@ class AgentService:
 
     def _copy_claude_config(self, workspace_path: str) -> None:
         """
-        Copy .claude directory from current project to workspace.
+        Copy .claude directory from project root to workspace.
 
-        This ensures the workspace has the same Claude configuration as the project.
+        The project root is determined by going up from this file's location
+        (backend/app/core/agent_service.py) to find the .claude directory.
 
         Args:
             workspace_path: Target workspace path
         """
-        # Find .claude directory in project root
-        project_claude_dir = None
+        # This file is at: backend/app/core/agent_service.py
+        # Project root .claude is at: ../../.. (3 levels up)
+        current_file = os.path.abspath(__file__)
+        # Go up: agent_service.py -> core -> app -> backend -> project_root
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file))))
+        project_claude_dir = os.path.join(project_root, ".claude")
 
-        # Try to find project root by looking for common markers
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        for _ in range(5):  # Search up to 5 levels
-            potential_claude = os.path.join(current_dir, ".claude")
-            if os.path.isdir(potential_claude):
-                project_claude_dir = potential_claude
-                break
-            parent = os.path.dirname(current_dir)
-            if parent == current_dir:
-                break
-            current_dir = parent
-
-        if not project_claude_dir:
-            logger.debug("No .claude directory found in project")
+        if not os.path.isdir(project_claude_dir):
+            logger.debug(f"No .claude directory found at project root: {project_claude_dir}")
             return
 
         # Target .claude directory in workspace
@@ -215,49 +200,32 @@ class AgentService:
         # Copy the directory
         try:
             shutil.copytree(project_claude_dir, target_claude_dir)
-            logger.info(f"Copied .claude directory to workspace: {target_claude_dir}")
+            logger.info(f"Copied .claude from {project_claude_dir} to {target_claude_dir}")
         except Exception as e:
             logger.warning(f"Failed to copy .claude directory: {e}")
 
-    def _create_options(
-            self,
-            workspace_path: str,
-            allowed_tools: Optional[List[str]] = None,
-            permission_mode: Optional[str] = None,
-            system_prompt: Optional[dict] = None,
-            model: Optional[str] = None,
-    ) -> ClaudeAgentOptions:
+    def _create_options(self, workspace_path: str) -> ClaudeAgentOptions:
         """
         Create Claude agent options.
 
         Args:
             workspace_path: Working directory for the agent
-            allowed_tools: List of allowed tools (defaults to DEFAULT_TOOLS)
-            permission_mode: Permission mode for Claude Code
-            system_prompt: Custom system prompt configuration
-            model: Model to use
 
         Returns:
             ClaudeAgentOptions configured for local execution
         """
-        if system_prompt:
-            prompt_config = system_prompt
-        else:
-            prompt_config = {
-                "type": "preset",
-                "preset": "claude_code",
-                "append": "You are helping the user with their coding tasks.",
-            }
-
-        tools = allowed_tools or DEFAULT_TOOLS.copy()
+        prompt_config = {
+            "type": "preset",
+            "preset": "claude_code",
+            "append": "You are helping the user with their coding tasks.",
+        }
 
         options = ClaudeAgentOptions(
-            allowed_tools=tools,
+            allowed_tools=DEFAULT_TOOLS.copy(),
             system_prompt=prompt_config,
-            permission_mode=permission_mode or self._permission_mode,
+            permission_mode=self._permission_mode,
             cwd=workspace_path,
             include_partial_messages=True,
-            model=model or self._model,
             setting_sources=["project", "local", "user"],
         )
 
@@ -266,8 +234,6 @@ class AgentService:
     async def _get_or_create_session(
             self,
             session_id: str,
-            workspace_path: Optional[str] = None,
-            **kwargs,
     ) -> AgentSession:
         """
         Get existing session or create a new one.
@@ -279,14 +245,12 @@ class AgentService:
 
         Args:
             session_id: Unique session identifier
-            workspace_path: Optional custom workspace path
-            **kwargs: Additional options for _create_options
 
         Returns:
             AgentSession instance
         """
-        # Get effective workspace path
-        effective_workspace = self._get_workspace_path(session_id, workspace_path)
+        # Get workspace path: {user_home}/workspace/{session_id}
+        effective_workspace = self._get_workspace_path(session_id)
 
         # Check if session already exists
         if session_id in self._sessions:
@@ -380,13 +344,7 @@ class AgentService:
         # Create new session
         logger.info(f"Creating new Claude client for session: {session_id}")
 
-        options = self._create_options(
-            workspace_path=effective_workspace,
-            allowed_tools=kwargs.get("allowed_tools"),
-            permission_mode=kwargs.get("permission_mode"),
-            system_prompt=kwargs.get("system_prompt"),
-            model=kwargs.get("model"),
-        )
+        options = self._create_options(workspace_path=effective_workspace)
 
         client = ClaudeSDKClient(options=options)
         await client.connect()
@@ -427,6 +385,10 @@ class AgentService:
                         "content": block.thinking,
                     })
                 elif isinstance(block, ToolUseBlock):
+                    # Debug: log the raw tool input
+                    logger.debug(f"ToolUseBlock: name={block.name}, id={block.id}, input_type={type(block.input)}, input={str(block.input)[:500]}")
+                    if block.name == "Write" and (not block.input or not block.input.get("file_path")):
+                        logger.warning(f"Empty or invalid Write tool input detected: {block.input}")
                     events.append({
                         "type": "tool_use",
                         "content": f"Using tool: {block.name}",
@@ -493,7 +455,6 @@ class AgentService:
             self,
             prompt: str,
             session_id: str,
-            workspace_path: Optional[str] = None,
     ) -> AsyncGenerator[ChatMessage, None]:
         """
         Execute a chat with streaming response.
@@ -501,17 +462,14 @@ class AgentService:
         Args:
             prompt: User prompt/query
             session_id: Unique session identifier for multi-turn conversation
-            workspace_path: Optional custom workspace path (default: {workspace_root}/{session_id})
+                       Workspace will be created at: {user_home}/workspace/{session_id}
 
         Yields:
             ChatMessage objects for each response chunk
         """
         try:
             # Get or create session
-            session = await self._get_or_create_session(
-                session_id=session_id,
-                workspace_path=workspace_path,
-            )
+            session = await self._get_or_create_session(session_id=session_id)
 
             # Send query
             logger.info(f"Sending query for session: {session_id}, prompt length: {len(prompt)}")
@@ -522,7 +480,7 @@ class AgentService:
             msg_count = 0
             async for msg in session.client.receive_response():
                 msg_count += 1
-                logger.debug(f"Received message #{msg_count} type: {type(msg).__name__} for session: {session_id}")
+                logger.debug(f"Received message #{msg_count} type: {type(msg).__name__} for session: {session_id} ,msg: {msg}")
 
                 # Check for cancellation
                 if session.is_cancelled:
@@ -581,7 +539,6 @@ class AgentService:
             self,
             prompt: str,
             session_id: str,
-            workspace_path: Optional[str] = None,
     ) -> List[ChatMessage]:
         """
         Execute a chat and return all responses (non-streaming).
@@ -589,17 +546,13 @@ class AgentService:
         Args:
             prompt: User prompt/query
             session_id: Unique session identifier for multi-turn conversation
-            workspace_path: Optional custom workspace path (default: {workspace_root}/{session_id})
+                       Workspace will be created at: {user_home}/workspace/{session_id}
 
         Returns:
             List of ChatMessage objects
         """
         messages = []
-        async for msg in self.chat_stream(
-                prompt=prompt,
-                session_id=session_id,
-                workspace_path=workspace_path,
-        ):
+        async for msg in self.chat_stream(prompt=prompt, session_id=session_id):
             messages.append(msg)
         return messages
 
