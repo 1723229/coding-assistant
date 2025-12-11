@@ -126,7 +126,7 @@ await service.chat_stream(
 # Step 2: 分析具体模块
 await service.chat_stream(
     prompt='--module "用户认证" --feature-tree "/path/to/FEATURE_TREE.md" --prd "/path/to/prd.md"',
-    session_id="session-001",
+    session_id="session-xxx",
     task_type="analyze-prd"
 )
 
