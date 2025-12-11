@@ -490,19 +490,14 @@ class AgentService:
             ChatMessage objects for each response chunk
         """
         try:
+            logger.info(f"Chat request prompt: {prompt}")
             if task_type == "prd-decompose":
-                # prompt 直接传入路径
-                # /{user_home}/{session_id}/prd.md
                 prompt = f"/prd-decompose {prompt}"
             elif task_type == "analyze-prd":
-                # prompt 内容如下组装：--module：模块名    --feature-tree ：功能树md绝对路径    --prd：原始prd绝对路径
-                # --module "D1组建团队" --feature-tree "/{user_home}/{session_id}/FEATURE_TREE.md" --prd "/{user_home}/{session_id}/prd.md"
                 prompt = f"/analyze-prd {prompt}"
             elif task_type == "prd-change":
-                # 需保持session_id一致
-                # prompt 内容如下组装
-                # User Review on "选中的内容", msg: "提出的需求"
                 prompt = prompt
+            logger.info(f"Chat final prompt: {prompt}")
 
             # Get or create session
             session = await self._get_or_create_session(session_id=session_id)
