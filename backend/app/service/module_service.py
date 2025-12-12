@@ -1694,7 +1694,8 @@ class ModuleService:
                 missing_files.append("METADATA.json")
 
             if missing_files:
-                yield f"data: {json.dumps({'type': 'error', 'message': f'缺少必要文件: {', '.join(missing_files)}'}, ensure_ascii=False)}\n\n"
+                message = f"缺少必要文件: {', '.join(missing_files)}"
+                yield f"data: {json.dumps({'type': 'error', 'message': message}, ensure_ascii=False)}\n\n"
                 return
 
             workspace_path = str(workspace_dir.absolute())
