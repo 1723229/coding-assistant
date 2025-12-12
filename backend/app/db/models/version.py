@@ -29,9 +29,9 @@ class Version(Base, BaseModel):
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True, comment="Primary Key ID")
     code = Column(String(64), nullable=False, comment="版本编号")
-    module_id = Column(BigInteger, ForeignKey("code_module.id", ondelete="CASCADE"), nullable=False, comment="所属模块ID")
+    module_id = Column(BigInteger, nullable=False, comment="所属模块ID")
     msg = Column(String(512), nullable=True, comment="提交信息，命名规范：[SpecCoding Auto Commit] - 具体commit内容")
-    commit = Column(String(64), nullable=False, comment="Git commit ID")
+    commit = Column(String(64), nullable=True, comment="Git commit ID")
     status = Column(String(32), nullable=False, default=VersionStatus.SPEC_GENERATING.value, comment="版本状态：spec_generating/spec_generated/code_building/build_completed")
     # spec_content = Column(String(10000), nullable=True, comment="生成的Spec内容")
 
