@@ -2176,7 +2176,8 @@ class ModuleService:
                 missing_files.append("prd.md")
 
             if missing_files:
-                yield f"data: {json.dumps({'type': 'error', 'message': f'PRD session {prd_session_id} 缺少文件: {', '.join(missing_files)}'}, ensure_ascii=False)}\n\n"
+                message = f"缺少必要文件: {', '.join(missing_files)}"
+                yield f"data: {json.dumps({'type': 'error', 'message': message}, ensure_ascii=False)}\n\n"
                 return
 
             yield f"data: {json.dumps({'type': 'step', 'step': 'validate_prd', 'status': 'success', 'message': 'PRD文件验证成功', 'progress': 20}, ensure_ascii=False)}\n\n"
