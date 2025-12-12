@@ -185,6 +185,18 @@ class ExecutorConfig:
 
 
 # ============================================================================
+# Container Management Configuration
+# ============================================================================
+
+class ContainerConfig:
+    """Container management configuration"""
+
+    _container_config = _config.get("container", {})
+
+    MAX_RUNNING_CONTAINERS = _container_config.get("max_running_containers", 1)
+
+
+# ============================================================================
 # Pydantic Settings
 # ============================================================================
 
@@ -258,6 +270,7 @@ __all__ = [
     "WorkspaceConfig",
     "DockerConfig",
     "ExecutorConfig",
+    "ContainerConfig",
     "Settings",
     "get_settings",
 ]

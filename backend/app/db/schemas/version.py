@@ -15,6 +15,8 @@ class VersionBase(BaseModel):
     module_id: int = Field(..., description="所属模块ID")
     msg: Optional[str] = Field(None, max_length=512, description="提交信息")
     commit: str = Field(..., max_length=64, description="Git commit ID")
+    status: Optional[str] = Field(None, max_length=64, description="状态")
+    spec_content: Optional[str] = Field(None, max_length=10000, description="spec内容")
 
     @field_validator("commit")
     @classmethod
@@ -45,6 +47,9 @@ class VersionUpdate(BaseModel):
     code: Optional[str] = Field(None, max_length=64, description="版本编号")
     msg: Optional[str] = Field(None, max_length=512, description="提交信息")
     commit: Optional[str] = Field(None, max_length=64, description="Git commit ID")
+    status: Optional[str] = Field(None, max_length=64, description="状态")
+    spec_content: Optional[str] = Field(None, max_length=10000, description="spec内容")
+    module_id: int = Field(..., description="所属模块ID")
 
     @field_validator("commit")
     @classmethod
