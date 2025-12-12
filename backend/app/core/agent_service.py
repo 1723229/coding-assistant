@@ -495,6 +495,8 @@ class AgentService:
                 prompt = f"/prd-decompose {prompt}"
             elif task_type == "analyze-prd":
                 prompt = f"/analyze-prd {prompt}"
+            elif task_type == "confirm-prd":
+                prompt = f"FEATRUE_TREE.md已经完成修订和审阅。请阅读并调用脚本完成格式校验，如格式校验未通过请自行修复，不要再问用户问题。"
             elif task_type == "prd-change":
                 prompt = prompt
             logger.info(f"Chat final prompt: {prompt}")
