@@ -30,6 +30,7 @@ from app.utils.mysql_util import MySQLUtil
 from datetime import datetime
 from app.utils.prompt.prompt_build import generate_code_from_spec
 from app.config.settings import ContainerConfig
+from app.core.agent_service import AgentService
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -51,6 +52,7 @@ class ModuleService:
         self.project_repo = ProjectRepository()
         self.version_repo = VersionRepository()
         self.session_repo = SessionRepository()
+        self.agent_service = AgentService()
         self.db = MySQLUtil(
       host="172.27.1.37",
       port=3306,
@@ -592,7 +594,7 @@ class ModuleService:
                 yield f"data: {json.dumps({'type': 'step', 'step': 'create_module', 'status': 'success', 'message': f'模块ID: {module_id}, URL_ID: {insert_id}', 'module_id': module_id, 'progress': 40})}\n\n"
 
                 # 步骤5: 检查并拉取代码
-                if project.codebase:
+                if project.codebase and project.codebase != '':
                     if not project.token:
                         yield f"data: {json.dumps({'type': 'error', 'message': '项目配置了Git地址但缺少Token'})}\n\n"
                         return
@@ -605,13 +607,24 @@ class ModuleService:
 
                         try:
                             service = GitHubService(token=project.token)
-                            await service.clone_repo(
+                            repo = await service.clone_repo(
                                 repo_url=project.codebase,
                                 target_path=workspace_path,
                                 branch=module_data.get("branch"),
                             )
+                            if repo:
+                                yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'success', 'message': '代码仓库克隆成功', 'progress': 50})}\n\n"
+                            else:
+                                yield f"data: {json.dumps({'type': 'error', 'message': f'代码拉取失败'})}\n\n"
+                                return
 
-                            yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'success', 'message': '代码仓库克隆成功', 'progress': 50})}\n\n"
+                            await self.session_repo.create_session(
+                                session_id=session_id,
+                                name=project.code + '-' + data.code,
+                                workspace_path=workspace_path,
+                                github_repo_url=project.codebase,
+                                github_branch=data.branch or "main",
+                            )
 
                             # 创建分支
                             yield f"data: {json.dumps({'type': 'step', 'step': 'create_branch', 'status': 'progress', 'message': '创建功能分支...', 'progress': 55})}\n\n"
@@ -675,7 +688,6 @@ class ModuleService:
                     code=version_code,
                     module_id=module_id,
                     msg="[SpecCoding Auto Commit] - Initial spec generation",
-                    commit="pending",  # 暂时设置为 pending，后续更新
                     status=VersionStatus.SPEC_GENERATING.value
                 )
 
@@ -1701,16 +1713,11 @@ class ModuleService:
             yield f"data: {json.dumps({'type': 'step', 'step': 'prd_change', 'status': 'progress', 'message': '开始PRD修改任务...', 'progress': 25}, ensure_ascii=False)}\n\n"
 
             try:
-                # 获取沙箱服务
-                sandbox_service = await session_manager.get_service(
-                    session_id=session_id,
-                    workspace_path=workspace_path,
-                )
 
                 logger.info(f"Starting prd-change task: session_id={session_id}, prompt={prompt}")
 
                 # 流式处理 prd-change 任务
-                async for chat_msg in sandbox_service.chat_stream(
+                async for chat_msg in self.agent_service.chat_stream(
                     prompt=prompt,
                     session_id=session_id,
                     task_type="prd-change",
@@ -1843,18 +1850,13 @@ class ModuleService:
 
             try:
                 # 获取沙箱服务
-                sandbox_service = await session_manager.get_service(
-                    session_id=session_id,
-                    workspace_path=workspace_path,
-                )
-
                 # confirm-prd 任务的 prompt 为空字符串
                 prompt = ""
 
                 logger.info(f"Starting confirm-prd task: session_id={session_id}")
 
                 # 流式处理 confirm-prd 任务
-                async for chat_msg in sandbox_service.chat_stream(
+                async for chat_msg in self.agent_service.chat_stream(
                     prompt=prompt,
                     session_id=session_id,
                     task_type="confirm-prd",
@@ -2190,16 +2192,10 @@ class ModuleService:
             yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': '开始PRD模块分析...', 'progress': 35}, ensure_ascii=False)}\n\n"
 
             try:
-                # 获取沙箱服务（使用模块自己的 session_id）
-                sandbox_service = await session_manager.get_service(
-                    session_id=session_id,
-                    workspace_path=module_workspace_path,
-                )
-
                 logger.info(f"Starting analyze-prd task: session_id={session_id}, module={module_name}")
 
                 # 流式处理 analyze-prd 任务
-                async for chat_msg in sandbox_service.chat_stream(
+                async for chat_msg in self.agent_service.chat_stream(
                     prompt=prompt,
                     session_id=session_id,
                     task_type="analyze-prd",
@@ -2384,6 +2380,13 @@ class ModuleService:
 
                     branch_name = f"{module.branch or 'main'}-{session_id}"
                     await service.create_branch(repo_path=workspace_path, branch_name=branch_name)
+                    await self.session_repo.create_session(
+                        session_id=session_id,
+                        name=project.code + '-' + module.code,
+                        workspace_path=workspace_path,
+                        github_repo_url=project.codebase,
+                        github_branch=module.branch or "main",
+                    )
 
                     yield f"data: {json.dumps({'type': 'step', 'step': 'create_branch', 'status': 'success', 'message': '功能分支创建成功', 'progress': 55}, ensure_ascii=False)}\n\n"
 
@@ -2399,7 +2402,7 @@ class ModuleService:
 
             try:
                 # 尝试获取容器信息
-                container_info = await executor.get_container_info(session_id)
+                container_info = await executor.get_container_status(session_id)
                 if container_info and container_info.get('status') == 'running':
                     container_exists = True
                     yield f"data: {json.dumps({'type': 'step', 'step': 'check_container', 'status': 'success', 'message': '容器已存在且运行中', 'progress': 65}, ensure_ascii=False)}\n\n"
@@ -2472,7 +2475,6 @@ class ModuleService:
                         code=version_code,
                         module_id=module.id,
                         msg="[SpecCoding Auto Commit] - Spec generation",
-                        commit="pending",
                         status=VersionStatus.SPEC_GENERATING.value
                     )
 
