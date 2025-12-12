@@ -79,6 +79,6 @@ executor:
 
 # Container Management
 container:
-  max_running_containers: 1  # 最大运行容器数量阈值
+  max_running_containers: 5  # 最大运行容器数量阈值
 
 
