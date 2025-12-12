@@ -1532,18 +1532,13 @@ class ModuleService:
 
             try:
                 # 获取沙箱服务
-                sandbox_service = await session_manager.get_service(
-                    session_id=session_id,
-                    workspace_path=workspace_path,
-                )
-
                 # 调用 chat_stream，传入 prd.md 的绝对路径和 task_type
                 prompt = str(prd_file_path.absolute())
 
                 logger.info(f"Starting prd-decompose task: session_id={session_id}, prompt={prompt}")
 
                 # 流式处理 prd-decompose 任务
-                async for chat_msg in sandbox_service.chat_stream(
+                async for chat_msg in self.agent_service.chat_stream(
                     prompt=prompt,
                     session_id=session_id,
                     task_type="prd-decompose",
