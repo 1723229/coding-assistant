@@ -1,5 +1,7 @@
 pandas
 openpyxl
+python-docx
+
 # FastAPI and server
 fastapi
 uvicorn[standard]

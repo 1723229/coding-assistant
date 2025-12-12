@@ -4,14 +4,15 @@ Module Service
 业务逻辑层 - Module operations with tree structure support
 POINT type modules create sessions and manage workspaces
 """
-
+import os
 import uuid
 import logging
 import json
 import asyncio
+import tempfile
 from typing import Optional, AsyncGenerator
 from pathlib import Path
-from fastapi import Query
+from fastapi import Query, UploadFile
 
 from app.api.chat_router import module_repo
 from app.config.logging_config import log_print
@@ -19,14 +20,16 @@ from app.config import get_settings
 from app.utils.model.response_model import BaseResponse, ListResponse
 from app.db.repository import ModuleRepository, ProjectRepository, VersionRepository, SessionRepository, \
     MessageRepository
-from app.db.schemas import ModuleCreate, ModuleUpdate, ModuleResponse, VersionCreate
+from app.db.schemas import ModuleCreate, ModuleUpdate, ModuleResponse, VersionCreate, VersionUpdate
 from app.db.models.module import ModuleType
+from app.db.models.version import VersionStatus
 from app.core.executor import get_sandbox_executor
 from app.core.github_service import GitHubService
 from app.core.sandbox_service import SandboxService, session_manager
 from app.utils.mysql_util import MySQLUtil
 from datetime import datetime
 from app.utils.prompt.prompt_build import generate_code_from_spec
+from app.config.settings import ContainerConfig
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -55,6 +58,91 @@ class ModuleService:
       password="123456",
       database="framework"
   )
+
+    async def _check_container_limit(self) -> tuple[bool, str]:
+        """
+        检查容器数量是否达到阈值
+
+        Returns:
+            (是否可以创建, 错误消息)
+        """
+        try:
+            running_count = await self.version_repo.count_running_containers()
+            max_containers = ContainerConfig.MAX_RUNNING_CONTAINERS
+
+            if running_count >= max_containers:
+                return False, f"已达到最大容器数量限制({max_containers})，当前运行中: {running_count}"
+
+            return True, ""
+
+        except Exception as e:
+            logger.error(f"Failed to check container limit: {e}", exc_info=True)
+            return False, f"检查容器限制失败: {str(e)}"
+
+    async def _update_version_status(
+        self,
+        version_id: int,
+        status: VersionStatus,
+        spec_content: Optional[str] = None
+    ) -> bool:
+        """
+        更新 Version 状态
+
+        Args:
+            version_id: Version ID
+            status: 新状态
+            spec_content: Spec 内容（可选）
+
+        Returns:
+            是否更新成功
+        """
+        try:
+            update_data = VersionUpdate(status=status.value)
+            if spec_content:
+                update_data.spec_content = spec_content
+
+            updated = await self.version_repo.update_version(
+                version_id=version_id,
+                data=update_data
+            )
+
+            if updated:
+                logger.info(f"Updated version {version_id} status to {status.value}")
+                return True
+            else:
+                logger.error(f"Failed to update version {version_id} status")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to update version status: {e}", exc_info=True)
+            return False
+
+    async def _cleanup_container(self, module_id: int, session_id: str) -> bool:
+        """
+        清理容器
+
+        Args:
+            module_id: 模块ID
+            session_id: 会话ID
+
+        Returns:
+            是否清理成功
+        """
+        try:
+            logger.info(f"Cleaning up container for module {module_id}, session {session_id}")
+
+            # 获取 sandbox executor
+            executor = get_sandbox_executor()
+
+            # 停止并删除容器
+            await executor.stop_container(session_id)
+
+            logger.info(f"Container cleanup completed for session {session_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup container: {e}", exc_info=True)
+            return False
 
     async def _generate_spec_document(
         self,
@@ -393,6 +481,15 @@ class ModuleService:
 
         实时返回创建进度，适用于POINT类型模块的长时间操作
 
+        流程：
+        1. 验证项目和模块合法性
+        2. 创建工作空间
+        3. 模块入库和sys_module入库
+        4. 检查并拉取代码（如果project有git地址）
+        5. 检查容器阈值
+        6. 创建容器
+        7. 生成Spec（如果有require_content）
+
         生成的事件：
         - connected: 连接建立
         - step: {step: "step_name", status: "progress/success/error", message: "...", progress: 20}
@@ -401,6 +498,9 @@ class ModuleService:
         """
         module_id = None
         insert_id = None
+        session_id = None
+        workspace_path = None
+        version_id = None
 
         try:
             # 发送连接确认
@@ -442,11 +542,15 @@ class ModuleService:
             url_parent_id = module_data.pop("url_parent_id")
 
             if data.type == ModuleType.POINT:
-                # 步骤3: 生成session和workspace
-                yield f"data: {json.dumps({'type': 'step', 'step': 'generate_session', 'status': 'progress', 'message': '生成会话和工作空间...', 'progress': 25})}\n\n"
+                # 步骤3: 生成session和创建工作空间
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_workspace', 'status': 'progress', 'message': '创建工作空间...', 'progress': 25})}\n\n"
 
                 session_id = str(uuid.uuid4())
                 workspace_path = str(settings.workspace_base_path / session_id)
+
+                # 创建工作空间目录
+                workspace_dir = Path(workspace_path)
+                workspace_dir.mkdir(parents=True, exist_ok=True)
 
                 module_data.update({
                     "session_id": session_id,
@@ -455,35 +559,88 @@ class ModuleService:
                     "is_active": 1,
                 })
 
-                yield f"data: {json.dumps({'type': 'step', 'step': 'generate_session', 'status': 'success', 'message': f'会话ID: {session_id}', 'progress': 30})}\n\n"
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_workspace', 'status': 'success', 'message': f'工作空间创建成功: {workspace_path}', 'progress': 30})}\n\n"
 
-                # 步骤4: 克隆代码仓库
+                # 步骤4: 模块入库
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_module', 'status': 'progress', 'message': '创建模块记录...', 'progress': 35})}\n\n"
+
+                # 先插入 sys_module 表，获取 insert_id
+                try:
+                    menu = {
+                        "full_name": data.name,
+                        "english_name": data.code,
+                        "url_address": data.url,
+                        "enable_mark": 1,
+                        "parent_id": url_parent_id,
+                        "sort_code": self.sort_code
+                    }
+                    insert_id = self.db.insert(table='sys_module', data=menu)
+                    logger.info(f"Inserted sys_module: {data.code}, url_id: {insert_id}")
+
+                    # 将 url_id 添加到模块数据中
+                    module_data["url_id"] = insert_id
+
+                except Exception as e:
+                    logger.error(f"Failed to insert sys_module: {e}")
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'sys_module入库失败: {str(e)}'})}\n\n"
+                    return
+
+                # 创建模块记录
+                module = await self.module_repo.create_module(data=module_data, created_by=created_by)
+                module_id = module.id
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_module', 'status': 'success', 'message': f'模块ID: {module_id}, URL_ID: {insert_id}', 'module_id': module_id, 'progress': 40})}\n\n"
+
+                # 步骤5: 检查并拉取代码
                 if project.codebase:
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'progress', 'message': '正在克隆代码仓库...', 'progress': 35})}\n\n"
-
-                    try:
-                        service = GitHubService(token=project.token)
-                        await service.clone_repo(
-                            repo_url=project.codebase,
-                            target_path=workspace_path,
-                            branch=module_data.get("branch"),
-                        )
-
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'success', 'message': '代码仓库克隆成功', 'progress': 45})}\n\n"
-
-                        # 创建分支
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'create_branch', 'status': 'progress', 'message': '创建功能分支...', 'progress': 50})}\n\n"
-
-                        await service.create_branch(repo_path=workspace_path, branch_name=data.branch + '-' + session_id)
-
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'create_branch', 'status': 'success', 'message': '功能分支创建成功', 'progress': 55})}\n\n"
-
-                    except Exception as e:
-                        yield f"data: {json.dumps({'type': 'error', 'message': f'代码拉取失败: {str(e)}'})}\n\n"
+                    if not project.token:
+                        yield f"data: {json.dumps({'type': 'error', 'message': '项目配置了Git地址但缺少Token'})}\n\n"
                         return
 
-                # 步骤5: 创建沙箱容器
-                yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'progress', 'message': '创建沙箱容器...', 'progress': 60})}\n\n"
+                    # 检查工作空间是否已有代码
+                    has_code = (workspace_dir / ".git").exists()
+
+                    if not has_code:
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'progress', 'message': '正在克隆代码仓库...', 'progress': 45})}\n\n"
+
+                        try:
+                            service = GitHubService(token=project.token)
+                            await service.clone_repo(
+                                repo_url=project.codebase,
+                                target_path=workspace_path,
+                                branch=module_data.get("branch"),
+                            )
+
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'success', 'message': '代码仓库克隆成功', 'progress': 50})}\n\n"
+
+                            # 创建分支
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'create_branch', 'status': 'progress', 'message': '创建功能分支...', 'progress': 55})}\n\n"
+
+                            branch_name = f"{data.branch or 'main'}-{session_id}"
+                            await service.create_branch(repo_path=workspace_path, branch_name=branch_name)
+
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'create_branch', 'status': 'success', 'message': '功能分支创建成功', 'progress': 60})}\n\n"
+
+                        except Exception as e:
+                            logger.error(f"Code clone failed: {e}")
+                            yield f"data: {json.dumps({'type': 'error', 'message': f'代码拉取失败: {str(e)}'})}\n\n"
+                            return
+                    else:
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'success', 'message': '工作空间已有代码，跳过克隆', 'progress': 60})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'skipped', 'message': '项目未配置Git地址，跳过代码拉取', 'progress': 60})}\n\n"
+
+                # 步骤6: 检查容器阈值
+                yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'progress', 'message': '检查容器限制...', 'progress': 62})}\n\n"
+
+                can_create, error_msg = await self._check_container_limit()
+                if not can_create:
+                    yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
+                    return
+                yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'success', 'message': '容器限制检查通过', 'progress': 65})}\n\n"
+
+                # 步骤7: 创建沙箱容器
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'progress', 'message': '创建沙箱容器...', 'progress': 67})}\n\n"
 
                 try:
                     executor = get_sandbox_executor()
@@ -499,28 +656,6 @@ class ModuleService:
                     yield f"data: {json.dumps({'type': 'error', 'message': f'容器创建失败: {str(e)}'})}\n\n"
                     return
 
-                # 步骤5: 创建数据库记录
-                yield f"data: {json.dumps({'type': 'step', 'step': 'create_db_record', 'status': 'progress', 'message': '创建数据库记录...', 'progress': 70})}\n\n"
-
-                module = await self.module_repo.create_module(data=module_data, created_by=created_by)
-                await self.session_repo.create_session(
-                    session_id=session_id,
-                    name=project.code + '-' + data.code,
-                    workspace_path=workspace_path,
-                    github_repo_url=project.codebase,
-                    github_branch=data.branch or "main",
-                )
-                module_id = module.id
-
-                menu = {
-                    "full_name": module.name,
-                    "english_name": module.code,
-                    "url_address": module.url,
-                    "enable_mark": 1,
-                    "parent_id": url_parent_id,
-                    "sort_code": self.sort_code
-                }
-                insert_id = self.db.insert(table='sys_module', data=menu)
                 module_data.update({
                     "url_id": insert_id,
                     "preview_url": settings.preview_ip + ':' + str(container_info["code_port"]) + data.url,
@@ -528,9 +663,28 @@ class ModuleService:
                 logger.info(f"preview_url: {settings.preview_ip + ':' + str(container_info['code_port']) + data.url}")
                 await self.module_repo.update_module(module_id=module_id, data=module_data)
 
+
                 yield f"data: {json.dumps({'type': 'step', 'step': 'create_db_record', 'status': 'success', 'message': f'模块ID: {module_id}', 'module_id': module_id, 'progress': 75})}\n\n"
 
-                # 步骤6: 生成spec文档
+
+                # 创建 Version 记录（初始状态：SPEC_GENERATING）
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 78})}\n\n"
+
+                version_code = f"v1.0.0-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                version_data = VersionCreate(
+                    code=version_code,
+                    module_id=module_id,
+                    msg="[SpecCoding Auto Commit] - Initial spec generation",
+                    commit="pending",  # 暂时设置为 pending，后续更新
+                    status=VersionStatus.SPEC_GENERATING.value
+                )
+
+                version = await self.version_repo.create_version(data=version_data, created_by=created_by)
+                version_id = version.id
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'success', 'message': f'版本ID: {version_id}', 'version_id': version_id, 'progress': 79})}\n\n"
+
+                # 步骤9: 生成spec文档
                 if data.require_content:
                     try:
                         await message_repo.create_message(
@@ -544,7 +698,7 @@ class ModuleService:
                     except Exception as e:
                         logger.error(f"Failed to save messages: {e}", exc_info=True)
 
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'progress', 'message': '正在生成技术规格文档...', 'progress': 80})}\n\n"
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'progress', 'message': '正在生成spec文档...', 'progress': 80})}\n\n"
 
                     message_queue = asyncio.Queue()
                     try:
@@ -579,6 +733,14 @@ class ModuleService:
                             yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'spec_content': spec_content, 'progress': 85})}\n\n"
                             module_update = ModuleUpdate(spec_content=spec_content)
                             module_repo.update_module(module_id=module.session_id, module_update=module_update)
+
+                            # 更新 Version 状态为 SPEC_GENERATED
+                            await self._update_version_status(
+                                version_id=version_id,
+                                status=VersionStatus.SPEC_GENERATED,
+                                spec_content=spec_content
+                            )
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'update_version_status', 'status': 'success', 'message': 'Version状态已更新为SPEC_GENERATED', 'progress': 87})}\n\n"
                         else:
                             yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'error', 'message': 'Spec文档生成失败', 'spec_content': spec_content, 'progress': 85})}\n\n"
                         # 保存会话
@@ -1005,6 +1167,48 @@ class ModuleService:
 
             yield f"data: {json.dumps({'type': 'step', 'step': 'verify_workspace', 'status': 'success', 'message': '工作空间验证成功', 'progress': 20}, ensure_ascii=False)}\n\n"
 
+            # 步骤2.5: 检查容器限制并创建/更新 Version
+            yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'progress', 'message': '检查容器限制...', 'progress': 22}, ensure_ascii=False)}\n\n"
+
+            # 检查容器数量
+            can_create, error_msg = await self._check_container_limit()
+            if not can_create:
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'success', 'message': '容器限制检查通过', 'progress': 24}, ensure_ascii=False)}\n\n"
+
+            # 查找或创建 Version 记录
+            yield f"data: {json.dumps({'type': 'step', 'step': 'prepare_version', 'status': 'progress', 'message': '准备版本记录...', 'progress': 26}, ensure_ascii=False)}\n\n"
+
+            # 查找 SPEC_GENERATED 状态的 Version
+            version = await self.version_repo.get_version_by_module_and_status(
+                module_id=module.id,
+                status=VersionStatus.SPEC_GENERATED.value
+            )
+
+            if version:
+                # 更新现有 Version 状态为 CODE_BUILDING
+                await self._update_version_status(
+                    version_id=version.id,
+                    status=VersionStatus.CODE_BUILDING
+                )
+                version_id = version.id
+                yield f"data: {json.dumps({'type': 'step', 'step': 'prepare_version', 'status': 'success', 'message': f'Version {version_id} 状态更新为CODE_BUILDING', 'progress': 28}, ensure_ascii=False)}\n\n"
+            else:
+                # 创建新的 Version（状态：CODE_BUILDING）
+                version_code = f"v1.0.0-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                version_data = VersionCreate(
+                    code=version_code,
+                    module_id=module.id,
+                    msg="[SpecCoding Auto Commit] - Code building",
+                    commit="pending",
+                    status=VersionStatus.CODE_BUILDING.value
+                )
+                version = await self.version_repo.create_version(data=version_data, created_by=updated_by)
+                version_id = version.id
+                yield f"data: {json.dumps({'type': 'step', 'step': 'prepare_version', 'status': 'success', 'message': f'创建Version {version_id}', 'progress': 28}, ensure_ascii=False)}\n\n"
+
             yield f"data: {json.dumps({'type': 'step', 'step': 'code_build', 'status': 'success', 'message': '开始生成代码', 'progress': 30}, ensure_ascii=False)}\n\n"
             # 步骤3: 生成代码
             message_queue = asyncio.Queue()
@@ -1065,12 +1269,11 @@ class ModuleService:
                 yield f"data: {json.dumps({'type': 'error', 'message': f'代码生成失败: {str(e)}'}, ensure_ascii=False)}\n\n"
                 return
 
-            # 步骤4: 创建版本记录
-            yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 50}, ensure_ascii=False)}\n\n"
+            # 步骤4: Commit 代码
+            yield f"data: {json.dumps({'type': 'step', 'step': 'commit', 'status': 'progress', 'message': '提交代码...', 'progress': 50}, ensure_ascii=False)}\n\n"
             # 使用 GitHubService 进行本地 commit
             commit_id = None
             try:
-                yield f"data: {json.dumps({'type': 'step', 'step': 'commit', 'status': 'success', 'message': f'代码进行commit', 'progress': 55}, ensure_ascii=False)}\n\n"
                 # Commit message
                 commit_message = f"[SpecCoding Auto Commit] - {module.name} ({module.code}) 功能实现"
 
@@ -1099,28 +1302,43 @@ class ModuleService:
 
             except Exception as e:
                 logger.error(f"Failed to commit code: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'代码提交失败: {str(e)}'}, ensure_ascii=False)}\n\n"
                 return
 
+            # 步骤5: 更新 Version 状态为 BUILD_COMPLETED
+            yield f"data: {json.dumps({'type': 'step', 'step': 'update_version', 'status': 'progress', 'message': '更新版本状态...', 'progress': 70}, ensure_ascii=False)}\n\n"
 
-            version_id = None
             try:
-                version_code = f"v{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                version_data = VersionCreate(
-                    code=version_code,
+                # 更新 Version 的 commit 和状态
+                version_update = VersionUpdate(
+                    commit=commit_id,
+                    status=VersionStatus.BUILD_COMPLETED.value,
+                    msg=f"{module.name} 代码构建完成: {content[:100]}",
                     module_id=module.id,
-                    msg=f"{module.name} 代码优化: {content[:100]}",
-                    commit=commit_id
+                    spec_content=spec_content,
                 )
-                version = await self.version_repo.create_version(
-                    data=version_data,
-                    created_by=updated_by
+                await self.version_repo.update_version(
+                    version_id=version_id,
+                    data=version_update
                 )
-                version_id = version.id
 
-                yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'success', 'message': f'版本创建成功: {version_code}', 'progress': 80}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'step', 'step': 'update_version', 'status': 'success', 'message': 'Version状态已更新为BUILD_COMPLETED', 'progress': 75}, ensure_ascii=False)}\n\n"
             except Exception as e:
-                logger.error(f"Failed to create version: {e}")
-                yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'warning', 'message': '版本创建失败', 'progress': 80}, ensure_ascii=False)}\n\n"
+                logger.error(f"Failed to update version: {e}")
+                yield f"data: {json.dumps({'type': 'step', 'step': 'update_version', 'status': 'warning', 'message': '版本更新失败', 'progress': 75}, ensure_ascii=False)}\n\n"
+
+            # 步骤6: 清理容器
+            yield f"data: {json.dumps({'type': 'step', 'step': 'cleanup_container', 'status': 'progress', 'message': '清理容器...', 'progress': 78}, ensure_ascii=False)}\n\n"
+
+            try:
+                cleanup_success = await self._cleanup_container(module.id, session_id)
+                if cleanup_success:
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'cleanup_container', 'status': 'success', 'message': '容器清理成功', 'progress': 80}, ensure_ascii=False)}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'cleanup_container', 'status': 'warning', 'message': '容器清理失败', 'progress': 80}, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                logger.error(f"Failed to cleanup container: {e}")
+                yield f"data: {json.dumps({'type': 'step', 'step': 'cleanup_container', 'status': 'warning', 'message': '容器清理失败', 'progress': 80}, ensure_ascii=False)}\n\n"
 
             # 步骤5: 更新模块的latest_commit_id
             yield f"data: {json.dumps({'type': 'step', 'step': 'update_module', 'status': 'progress', 'message': '更新模块信息...', 'progress': 90}, ensure_ascii=False)}\n\n"
@@ -1137,10 +1355,1216 @@ class ModuleService:
                 yield f"data: {json.dumps({'type': 'step', 'step': 'update_module', 'status': 'warning', 'message': '模块更新失败', 'progress': 100}, ensure_ascii=False)}\n\n"
 
             # 完成
-            yield f"data: {json.dumps({'type': 'complete', 'module_id': module.id, 'spec_content': spec_content, 'version_id': version_id, 'message': '代码构建完成'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'module_id': module.id, 'spec_content': spec_content, 'version_id': version_id, 'commit_id': commit_id, 'message': '代码构建完成，容器已清理'}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             logger.error(f"Optimization stream failed: {e}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'message': f'优化失败: {str(e)}'}, ensure_ascii=False)}\n\n"
 
+    async def _convert_file_to_markdown(self, file: UploadFile, temp_path: Path) -> str:
+        """
+        将上传的文件转换为Markdown格式
+
+        Args:
+            file: 上传的文件对象
+            temp_path: 临时文件路径
+
+        Returns:
+            转换后的Markdown内容
+
+        Raises:
+            ValueError: 不支持的文件格式
+        """
+        file_ext = temp_path.suffix.lower()
+
+        try:
+            if file_ext == '.md':
+                # Markdown文件直接读取
+                content = temp_path.read_text(encoding='utf-8')
+                return content
+
+            elif file_ext == '.txt':
+                # 纯文本文件直接读取
+                content = temp_path.read_text(encoding='utf-8')
+                return content
+
+            elif file_ext == '.docx':
+                # Word文档转换为Markdown
+                try:
+                    from docx import Document
+                except ImportError:
+                    raise ValueError("需要安装 python-docx 库来处理 .docx 文件。请运行: pip install python-docx")
+
+                doc = Document(temp_path)
+                markdown_lines = []
+
+                for para in doc.paragraphs:
+                    text = para.text.strip()
+                    if not text:
+                        markdown_lines.append("")
+                        continue
+
+                    # 根据样式转换为Markdown
+                    style_name = para.style.name.lower()
+
+                    if 'heading 1' in style_name:
+                        markdown_lines.append(f"# {text}")
+                    elif 'heading 2' in style_name:
+                        markdown_lines.append(f"## {text}")
+                    elif 'heading 3' in style_name:
+                        markdown_lines.append(f"### {text}")
+                    elif 'heading 4' in style_name:
+                        markdown_lines.append(f"#### {text}")
+                    elif 'heading 5' in style_name:
+                        markdown_lines.append(f"##### {text}")
+                    elif 'heading 6' in style_name:
+                        markdown_lines.append(f"###### {text}")
+                    else:
+                        markdown_lines.append(text)
+
+                # 处理表格
+                for table in doc.tables:
+                    markdown_lines.append("")
+                    for i, row in enumerate(table.rows):
+                        cells = [cell.text.strip() for cell in row.cells]
+                        markdown_lines.append("| " + " | ".join(cells) + " |")
+                        if i == 0:
+                            # 添加表头分隔符
+                            markdown_lines.append("| " + " | ".join(["---"] * len(cells)) + " |")
+                    markdown_lines.append("")
+
+                return "\n".join(markdown_lines)
+
+            else:
+                raise ValueError(f"不支持的文件格式: {file_ext}。支持的格式: .docx, .md, .txt")
+
+        except Exception as e:
+            logger.error(f"文件转换失败: {e}", exc_info=True)
+            raise
+
+    async def upload_file_and_create_module_stream(
+        self,
+        file: UploadFile,
+        session_id: str
+    ) -> AsyncGenerator[str, None]:
+        """
+        上传文件并流式处理PRD分解任务
+
+        流程：
+        1. 接收文件上传
+        2. 根据文件类型转换为Markdown
+        3. 保存到 workspace/{session_id}/prd.md
+        4. 调用 chat_stream 进行 prd-decompose 任务
+        5. 读取生成的 FEATURE_TREE.md 和 METADATA.json
+        6. 返回给前端
+
+        Args:
+            file: 上传的文件
+            session_id: 会话ID
+
+        Yields:
+            SSE格式的事件消息
+        """
+        temp_file_path = None
+
+        try:
+            # 发送连接确认
+            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+            await asyncio.sleep(0)
+
+            # 步骤1: 准备工作空间路径
+            yield f"data: {json.dumps({'type': 'step', 'step': 'prepare_workspace', 'status': 'progress', 'message': '准备工作空间...', 'progress': 5}, ensure_ascii=False)}\n\n"
+
+            # 构建workspace路径: settings.workspace_base_path / session_id
+            workspace_dir = Path.home() / "workspace" / session_id
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            workspace_path = str(workspace_dir.absolute())
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'prepare_workspace', 'status': 'success', 'message': f'工作空间: {workspace_path}', 'progress': 10}, ensure_ascii=False)}\n\n"
+
+            # 步骤2: 接收并保存文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'upload_file', 'status': 'progress', 'message': '正在接收文件...', 'progress': 15}, ensure_ascii=False)}\n\n"
+
+            # 创建临时文件
+            file_ext = Path(file.filename).suffix
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
+                temp_file_path = Path(temp_file.name)
+                content = await file.read()
+                temp_file.write(content)
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'upload_file', 'status': 'success', 'message': f'文件接收成功: {file.filename}', 'progress': 20}, ensure_ascii=False)}\n\n"
+
+            # 步骤3: 转换文件为Markdown
+            yield f"data: {json.dumps({'type': 'step', 'step': 'convert_file', 'status': 'progress', 'message': '正在转换文件格式...', 'progress': 25}, ensure_ascii=False)}\n\n"
+
+            try:
+                markdown_content = await self._convert_file_to_markdown(file, temp_file_path)
+
+                # 保存到 workspace/{session_id}/prd.md
+                prd_file_path = workspace_dir / "prd.md"
+
+                with open(prd_file_path, "w", encoding="utf-8") as f:
+                    f.write(markdown_content)
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'convert_file', 'status': 'success', 'message': f'文件已保存到: {prd_file_path}', 'progress': 30}, ensure_ascii=False)}\n\n"
+
+            except ValueError as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+                return
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'文件转换失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤4: 调用 chat_stream 进行 prd-decompose 任务
+            yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'progress', 'message': '开始PRD分解任务...', 'progress': 35}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 获取沙箱服务
+                sandbox_service = await session_manager.get_service(
+                    session_id=session_id,
+                    workspace_path=workspace_path,
+                )
+
+                # 调用 chat_stream，传入 prd.md 的绝对路径和 task_type
+                prompt = str(prd_file_path.absolute())
+
+                logger.info(f"Starting prd-decompose task: session_id={session_id}, prompt={prompt}")
+
+                # 流式处理 prd-decompose 任务
+                async for chat_msg in sandbox_service.chat_stream(
+                    prompt=prompt,
+                    session_id=session_id,
+                    task_type="prd-decompose",
+                ):
+                    # 转发 chat 消息作为进度更新
+                    msg_dict = chat_msg.to_dict()
+
+                    # 根据消息类型调整进度展示
+                    if chat_msg.type in ("text", "text_delta"):
+                        # 文本消息，显示为 prd_decompose 进度（35-80%）
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'progress', 'message': chat_msg.content[:100], 'progress': 50}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "tool_use":
+                        # 工具调用
+                        tool_name = msg_dict.get('tool_name', 'unknown')
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'progress', 'message': f'正在执行: {tool_name}', 'progress': 60}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "error":
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'PRD分解失败: {chat_msg.content}'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    await asyncio.sleep(0.01)
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'success', 'message': 'PRD分解任务完成', 'progress': 80}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"PRD decompose failed: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'PRD分解失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤5: 读取生成的文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'read_results', 'status': 'progress', 'message': '读取生成的文件...', 'progress': 85}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 根据文档，生成的文件路径为: {workspace_path}/docs/PRD-GEN/
+                prd_gen_dir = workspace_dir / "docs" / "PRD-GEN"
+                feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
+                metadata_path = prd_gen_dir / "METADATA.json"
+
+                # 检查文件是否存在
+                if not feature_tree_path.exists():
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'未找到文件: {feature_tree_path}'}, ensure_ascii=False)}\n\n"
+                    return
+
+                if not metadata_path.exists():
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'未找到文件: {metadata_path}'}, ensure_ascii=False)}\n\n"
+                    return
+
+                # 读取文件内容
+                feature_tree_content = feature_tree_path.read_text(encoding='utf-8')
+                metadata_content = metadata_path.read_text(encoding='utf-8')
+
+                # 解析 JSON
+                try:
+                    metadata_json = json.loads(metadata_content)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse METADATA.json: {e}")
+                    metadata_json = {"error": "Invalid JSON format"}
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'read_results', 'status': 'success', 'message': '文件读取成功', 'progress': 95}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"Failed to read generated files: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'读取生成文件失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤6: 返回结果
+            result_data = {
+                'type': 'complete',
+                'message': 'PRD处理完成',
+                'progress': 100,
+                'data': {
+                    'feature_tree': feature_tree_content,
+                    'metadata': metadata_json,
+                    'prd_path': str(prd_file_path.absolute()),
+                    'feature_tree_path': str(feature_tree_path.absolute()),
+                    'metadata_path': str(metadata_path.absolute()),
+                }
+            }
+
+            yield f"data: {json.dumps(result_data, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Upload and PRD decompose failed: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+
+        finally:
+            # 清理临时文件
+            if temp_file_path and temp_file_path.exists():
+                try:
+                    temp_file_path.unlink()
+                    logger.info(f"Temporary file deleted: {temp_file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete temporary file: {e}")
+
+    async def prd_change_stream(
+        self,
+        session_id: str,
+        selected_content: str,
+        msg: str,
+    ) -> AsyncGenerator[str, None]:
+        """
+        PRD 修改任务（流式）
+
+        根据用户反馈修改已有的 PRD 内容
+
+        流程：
+        1. 验证 session_id 对应的目录和文件是否存在
+        2. 构建 prompt: User Review on "{selected_content}", msg: "{msg}"
+        3. 调用 chat_stream 进行 prd-change 任务
+        4. 读取更新后的 FEATURE_TREE.md 和 METADATA.json
+        5. 返回给前端
+
+        Args:
+            session_id: 会话ID（必须与原始PRD的session_id一致）
+            selected_content: 选中的内容
+            msg: 提出的需求
+
+        Yields:
+            SSE格式的事件消息
+        """
+        try:
+            # 发送连接确认
+            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+            await asyncio.sleep(0)
+
+            # 步骤1: 验证 session_id 和文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_session', 'status': 'progress', 'message': '验证会话和文件...', 'progress': 5}, ensure_ascii=False)}\n\n"
+
+            # 构建workspace路径
+            workspace_dir = Path.home() / "workspace" / session_id
+
+            # 检查目录是否存在
+            if not workspace_dir.exists():
+                yield f"data: {json.dumps({'type': 'error', 'message': f'会话 {session_id} 对应的工作空间不存在'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 检查必要文件是否存在
+            prd_file_path = workspace_dir / "prd.md"
+            prd_gen_dir = workspace_dir / "docs" / "PRD-GEN"
+            feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
+            metadata_path = prd_gen_dir / "METADATA.json"
+
+            missing_files = []
+            if not prd_file_path.exists():
+                missing_files.append("prd.md")
+            if not feature_tree_path.exists():
+                missing_files.append("FEATURE_TREE.md")
+            if not metadata_path.exists():
+                missing_files.append("METADATA.json")
+
+            if missing_files:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'缺少必要文件: {', '.join(missing_files)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            workspace_path = str(workspace_dir.absolute())
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_session', 'status': 'success', 'message': '会话和文件验证成功', 'progress': 10}, ensure_ascii=False)}\n\n"
+
+            # 步骤2: 构建 prompt
+            yield f"data: {json.dumps({'type': 'step', 'step': 'build_prompt', 'status': 'progress', 'message': '构建请求...', 'progress': 15}, ensure_ascii=False)}\n\n"
+
+            # 按照规范构建 prompt: User Review on "选中的内容", msg: "提出的需求"
+            prompt = f'User Review on "{selected_content}", msg: "{msg}"'
+
+            logger.info(f"PRD change prompt: {prompt}")
+            yield f"data: {json.dumps({'type': 'step', 'step': 'build_prompt', 'status': 'success', 'message': 'Prompt 构建完成', 'progress': 20}, ensure_ascii=False)}\n\n"
+
+            # 步骤3: 调用 chat_stream 进行 prd-change 任务
+            yield f"data: {json.dumps({'type': 'step', 'step': 'prd_change', 'status': 'progress', 'message': '开始PRD修改任务...', 'progress': 25}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 获取沙箱服务
+                sandbox_service = await session_manager.get_service(
+                    session_id=session_id,
+                    workspace_path=workspace_path,
+                )
+
+                logger.info(f"Starting prd-change task: session_id={session_id}, prompt={prompt}")
+
+                # 流式处理 prd-change 任务
+                async for chat_msg in sandbox_service.chat_stream(
+                    prompt=prompt,
+                    session_id=session_id,
+                    task_type="prd-change",
+                ):
+                    # 转发 chat 消息作为进度更新
+                    msg_dict = chat_msg.to_dict()
+
+                    # 根据消息类型调整进度展示
+                    if chat_msg.type in ("text", "text_delta"):
+                        # 文本消息，显示为 prd_change 进度（25-75%）
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_change', 'status': 'progress', 'message': chat_msg.content[:100], 'progress': 50}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "tool_use":
+                        # 工具调用
+                        tool_name = msg_dict.get('tool_name', 'unknown')
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_change', 'status': 'progress', 'message': f'正在执行: {tool_name}', 'progress': 60}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "error":
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'PRD修改失败: {chat_msg.content}'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    await asyncio.sleep(0.01)
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'prd_change', 'status': 'success', 'message': 'PRD修改任务完成', 'progress': 75}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"PRD change failed: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'PRD修改失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤4: 读取更新后的文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'read_results', 'status': 'progress', 'message': '读取更新后的文件...', 'progress': 85}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 重新读取文件内容（已经被更新）
+                feature_tree_content = feature_tree_path.read_text(encoding='utf-8')
+                metadata_content = metadata_path.read_text(encoding='utf-8')
+
+                # 解析 JSON
+                try:
+                    metadata_json = json.loads(metadata_content)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse METADATA.json: {e}")
+                    metadata_json = {"error": "Invalid JSON format"}
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'read_results', 'status': 'success', 'message': '文件读取成功', 'progress': 95}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"Failed to read updated files: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'读取更新文件失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤5: 返回结果
+            result_data = {
+                'type': 'complete',
+                'message': 'PRD修改完成',
+                'progress': 100,
+                'data': {
+                    'feature_tree': feature_tree_content,
+                    'metadata': metadata_json,
+                    'feature_tree_path': str(feature_tree_path.absolute()),
+                    'metadata_path': str(metadata_path.absolute()),
+                }
+            }
+
+            yield f"data: {json.dumps(result_data, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"PRD change stream failed: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+
+    async def confirm_prd_stream(
+        self,
+        session_id: str,
+    ) -> AsyncGenerator[str, None]:
+        """
+        PRD 审阅确认任务（流式）
+
+        用户已确认PRD修改完成，进行确认
+
+        流程：
+        1. 验证 session_id 对应的目录和文件是否存在
+        2. 调用 chat_stream 进行 confirm-prd 任务（prompt 为空字符串）
+        3. 读取更新后的 FEATURE_TREE.md 和 METADATA.json
+        4. 返回给前端
+
+        Args:
+            session_id: 会话ID（必须与原始PRD的session_id一致）
+
+        Yields:
+            SSE格式的事件消息
+        """
+        try:
+            # 发送连接确认
+            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+            await asyncio.sleep(0)
+
+            # 步骤1: 验证 session_id 和文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_session', 'status': 'progress', 'message': '验证会话和文件...', 'progress': 5}, ensure_ascii=False)}\n\n"
+
+            # 构建workspace路径
+            workspace_dir = Path.home() / "workspace" / session_id
+
+            # 检查目录是否存在
+            if not workspace_dir.exists():
+                yield f"data: {json.dumps({'type': 'error', 'message': f'会话 {session_id} 对应的工作空间不存在'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 检查必要文件是否存在
+            prd_file_path = workspace_dir / "prd.md"
+            prd_gen_dir = workspace_dir / "docs" / "PRD-GEN"
+            feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
+            metadata_path = prd_gen_dir / "METADATA.json"
+
+            missing_files = []
+            if not prd_file_path.exists():
+                missing_files.append("prd.md")
+            if not feature_tree_path.exists():
+                missing_files.append("FEATURE_TREE.md")
+            if not metadata_path.exists():
+                missing_files.append("METADATA.json")
+
+            if missing_files:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'缺少必要文件: {', '.join(missing_files)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            workspace_path = str(workspace_dir.absolute())
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_session', 'status': 'success', 'message': '会话和文件验证成功', 'progress': 10}, ensure_ascii=False)}\n\n"
+
+            # 步骤2: 调用 chat_stream 进行 confirm-prd 任务
+            yield f"data: {json.dumps({'type': 'step', 'step': 'confirm_prd', 'status': 'progress', 'message': '开始PRD确认任务...', 'progress': 15}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 获取沙箱服务
+                sandbox_service = await session_manager.get_service(
+                    session_id=session_id,
+                    workspace_path=workspace_path,
+                )
+
+                # confirm-prd 任务的 prompt 为空字符串
+                prompt = ""
+
+                logger.info(f"Starting confirm-prd task: session_id={session_id}")
+
+                # 流式处理 confirm-prd 任务
+                async for chat_msg in sandbox_service.chat_stream(
+                    prompt=prompt,
+                    session_id=session_id,
+                    task_type="confirm-prd",
+                ):
+                    # 转发 chat 消息作为进度更新
+                    msg_dict = chat_msg.to_dict()
+
+                    # 根据消息类型调整进度展示
+                    if chat_msg.type in ("text", "text_delta"):
+                        # 文本消息，显示为 confirm_prd 进度（15-75%）
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'confirm_prd', 'status': 'progress', 'message': chat_msg.content[:100], 'progress': 50}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "tool_use":
+                        # 工具调用
+                        tool_name = msg_dict.get('tool_name', 'unknown')
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'confirm_prd', 'status': 'progress', 'message': f'正在执行: {tool_name}', 'progress': 60}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "error":
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'PRD确认失败: {chat_msg.content}'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    await asyncio.sleep(0.01)
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'confirm_prd', 'status': 'success', 'message': 'PRD确认任务完成', 'progress': 75}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"PRD confirm failed: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'PRD确认失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤3: 读取更新后的文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'read_results', 'status': 'progress', 'message': '读取更新后的文件...', 'progress': 85}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 重新读取文件内容（已经被更新）
+                feature_tree_content = feature_tree_path.read_text(encoding='utf-8')
+                metadata_content = metadata_path.read_text(encoding='utf-8')
+
+                # 解析 JSON
+                try:
+                    metadata_json = json.loads(metadata_content)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse METADATA.json: {e}")
+                    metadata_json = {"error": "Invalid JSON format"}
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'read_results', 'status': 'success', 'message': '文件读取成功', 'progress': 95}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"Failed to read updated files: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'读取更新文件失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤4: 返回结果
+            result_data = {
+                'type': 'complete',
+                'message': 'PRD确认完成',
+                'progress': 100,
+                'data': {
+                    'feature_tree': feature_tree_content,
+                    'metadata': metadata_json,
+                    'feature_tree_path': str(feature_tree_path.absolute()),
+                    'metadata_path': str(metadata_path.absolute()),
+                }
+            }
+
+            yield f"data: {json.dumps(result_data, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"PRD confirm stream failed: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+
+    @log_print
+    async def create_modules_from_metadata(self, session_id: str):
+        """
+        根据 METADATA.json 批量创建 project 和 modules
+
+        流程：
+        1. 读取 {workspace}/{session_id}/docs/PRD-GEN/METADATA.json
+        2. 根据 system_info 创建 project
+        3. 根据 features 递归创建 modules
+        4. 插入 sys_module 表
+
+        Args:
+            session_id: 会话ID
+
+        Returns:
+            BaseResponse with created project_id and module count
+        """
+        try:
+            # 步骤1: 读取 METADATA.json
+            workspace_dir = Path.home() / "workspace" / session_id
+            metadata_path = workspace_dir / "docs" / "PRD-GEN" / "METADATA.json"
+
+            if not metadata_path.exists():
+                return BaseResponse.error(message=f"未找到文件: {metadata_path}")
+
+            with open(metadata_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+
+            system_info = metadata.get('system_info', {})
+            features = metadata.get('features', [])
+
+            if not system_info:
+                return BaseResponse.error(message="METADATA.json 中缺少 system_info")
+
+            # 步骤2: 创建 project
+            project_name = system_info.get('name_zh', 'Unnamed Project')
+            project_code = system_info.get('name_en', 'Unnamed Project')
+
+            # 检查项目是否已存在
+            existing_project = await self.project_repo.get_project_by_code(code=project_code)
+
+            if existing_project:
+                project_id = existing_project.id
+                logger.info(f"Project already exists: {project_name} (id: {project_id})")
+            else:
+                from app.db.schemas import ProjectCreate
+                project_data = ProjectCreate(
+                    code=project_code,
+                    name=project_name
+                )
+
+                project = await self.project_repo.create_project(data=project_data)
+                project_id = project.id
+                logger.info(f"Created project: {project_name} (id: {project_id})")
+
+            # 步骤3: 递归创建 modules
+            created_modules = []
+            module_count = 0
+
+            async def create_module_tree(feature_data, parent_id=None, url_parent_id=None, level=0):
+                """递归创建模块树"""
+                nonlocal module_count
+
+                # 生成模块代码
+                module_code = f"{feature_data.get('name_en', f'mod_{uuid.uuid4().hex[:8]}')}"
+
+                # 判断模块类型：is_leaf 为 true 是 POINT，false 是 NODE
+                is_leaf = feature_data.get('is_leaf', False)
+                module_type = ModuleType.POINT if is_leaf else ModuleType.NODE
+
+                # 创建模块数据
+                module_data = ModuleCreate(
+                    project_id=project_id,
+                    parent_id=parent_id,
+                    name=feature_data.get('name_zh', 'Unnamed Module'),
+                    code=module_code,
+                    type=module_type,
+                    url=feature_data.get('url', '/')
+                )
+                module_data = module_data.model_dump()
+                module_data.pop('url_parent_id')
+
+                # 如果是 POINT 类型，生成 session_id 和 workspace_path
+                if module_type == ModuleType.POINT:
+                    session_id = str(uuid.uuid4())
+                    workspace_path = str(settings.workspace_base_path / session_id)
+
+                    # 创建 workspace 目录
+                    workspace_dir = Path(workspace_path)
+                    workspace_dir.mkdir(parents=True, exist_ok=True)
+                    module_data.update({
+                        'session_id': session_id,
+                        'workspace_path': workspace_path,
+                        'branch': 'main',
+                        'is_active': 1,
+                    })
+
+                    logger.info(f"POINT module: {module_code}, session_id: {session_id}, workspace: {workspace_path}")
+
+                # 检查模块是否已存在
+                existing_module = await self.module_repo.get_module_by_code(
+                    project_id=project_id,
+                    is_active=1,
+                    code=module_code
+                )
+
+                if existing_module:
+                    logger.info(f"Module already exists: {module_code}")
+                    module = existing_module
+                    # 获取已存在模块的 url_id
+                    current_url_id = module.url_id
+                else:
+                    # 先插入 sys_module 表，获取 insert_id
+                    try:
+                        menu = {
+                            "full_name": feature_data.get('name_zh', 'Unnamed Module'),
+                            "english_name": module_code,
+                            "url_address": feature_data.get('url', '/'),
+                            "enable_mark": 1,
+                            "parent_id": url_parent_id,
+                            "sort_code": self.sort_code + level * 100
+                        }
+                        insert_id = self.db.insert(table='sys_module', data=menu)
+                        logger.info(f"Inserted sys_module: {module_code}, url_id: {insert_id}")
+
+                        # 将 url_id 添加到模块数据中
+                        module_data.update({'url_id': insert_id})
+                        current_url_id = insert_id
+
+                    except Exception as e:
+                        logger.error(f"Failed to insert sys_module: {e}")
+                        # 如果 sys_module 插入失败，继续创建模块但不设置 url_id
+                        current_url_id = None
+
+                    # 创建模块记录
+                    module = await self.module_repo.create_module(data=module_data)
+                    logger.info(f"Created module: {module.name} (type: {module_type}, code: {module_code}, url_id: {current_url_id})")
+
+                module_info = {
+                    'id': module.id,
+                    'name': module.name,
+                    'code': module.code,
+                    'type': module_type.value,
+                    'url': module.url,
+                    'url_id': current_url_id,
+                }
+
+                # 如果是 POINT 类型，添加 session_id 和 workspace_path
+                if module_type == ModuleType.POINT:
+                    module_info['session_id'] = module.session_id
+                    module_info['workspace_path'] = module.workspace_path
+
+                created_modules.append(module_info)
+                module_count += 1
+
+                # 递归处理子节点，传递当前模块的 url_id 作为子节点的 parent_id
+                children = feature_data.get('children', [])
+                for child in children:
+                    await create_module_tree(child, parent_id=module.id, url_parent_id=current_url_id, level=level + 1)
+
+            # 创建所有功能模块
+            for feature in features:
+                await create_module_tree(feature, parent_id=None, url_parent_id=None, level=0)
+
+            return BaseResponse.success(
+                data={
+                    'project_id': project_id,
+                    'project_name': project_name,
+                    'module_count': module_count
+                },
+                message=f"成功创建项目和 {module_count} 个模块"
+            )
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse METADATA.json: {e}", exc_info=True)
+            return BaseResponse.error(message=f"JSON 解析失败: {str(e)}")
+        except Exception as e:
+            logger.error(f"Failed to create modules from metadata: {e}", exc_info=True)
+            return BaseResponse.error(message=f"创建失败: {str(e)}")
+
+    async def analyze_prd_module_stream(
+        self,
+        session_id: str,
+        module_name: str,
+        prd_session_id: str,
+    ) -> AsyncGenerator[str, None]:
+        """
+        PRD 模块分析任务（流式）
+
+        分析 PRD 中的特定功能模块，生成详细的模块设计文档
+
+        流程：
+        1. 验证 session_id 对应的 workspace 和 module
+        2. 验证 prd_session_id 对应的 FEATURE_TREE.md 和 prd.md
+        3. 构建 prompt: --module "{module_name}" --feature-tree "..." --prd "..."
+        4. 调用 chat_stream 进行 analyze-prd 任务
+        5. 读取生成的 clarification.md
+        6. 保存到 module.require_content
+        7. 返回给前端
+
+        Args:
+            session_id: 模块的 session_id（每次唯一，避免冲突）
+            module_name: 要分析的模块名称
+            prd_session_id: PRD 的 session_id（用于定位 FEATURE_TREE.md 和 prd.md）
+
+        Yields:
+            SSE格式的事件消息
+        """
+        try:
+            # 发送连接确认
+            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+            await asyncio.sleep(0)
+
+            # 步骤1: 验证模块的 session_id 和 workspace
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_module', 'status': 'progress', 'message': '验证模块信息...', 'progress': 5}, ensure_ascii=False)}\n\n"
+
+            # 构建模块的 workspace 路径
+            module_workspace_dir = Path.home() / "workspace" / session_id
+
+            if not module_workspace_dir.exists():
+                yield f"data: {json.dumps({'type': 'error', 'message': f'模块 session {session_id} 对应的工作空间不存在'}, ensure_ascii=False)}\n\n"
+                return
+
+            module_workspace_path = str(module_workspace_dir.absolute())
+
+            # 查找对应的 module
+            module = await self.module_repo.get_module_by_session_id(session_id=session_id)
+            if not module:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'未找到 session_id 为 {session_id} 的模块'}, ensure_ascii=False)}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_module', 'status': 'success', 'message': f'模块验证成功: {module.name}', 'progress': 10}, ensure_ascii=False)}\n\n"
+
+            # 步骤2: 验证 PRD 的文件
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_prd', 'status': 'progress', 'message': '验证PRD文件...', 'progress': 15}, ensure_ascii=False)}\n\n"
+
+            prd_workspace_dir = Path.home() / "workspace" / prd_session_id
+            prd_gen_dir = prd_workspace_dir / "docs" / "PRD-GEN"
+            feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
+            prd_file_path = prd_workspace_dir / "prd.md"
+
+            missing_files = []
+            if not feature_tree_path.exists():
+                missing_files.append("FEATURE_TREE.md")
+            if not prd_file_path.exists():
+                missing_files.append("prd.md")
+
+            if missing_files:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'PRD session {prd_session_id} 缺少文件: {', '.join(missing_files)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_prd', 'status': 'success', 'message': 'PRD文件验证成功', 'progress': 20}, ensure_ascii=False)}\n\n"
+
+            # 步骤3: 构建 prompt
+            yield f"data: {json.dumps({'type': 'step', 'step': 'build_prompt', 'status': 'progress', 'message': '构建分析请求...', 'progress': 25}, ensure_ascii=False)}\n\n"
+
+            # 按照规范构建 prompt: --module "模块名称" --feature-tree "路径" --prd "路径"
+            prompt = f'--module "{module_name}" --feature-tree "{feature_tree_path.absolute()}" --prd "{prd_file_path.absolute()}"'
+
+            logger.info(f"analyze-prd prompt: {prompt}")
+            yield f"data: {json.dumps({'type': 'step', 'step': 'build_prompt', 'status': 'success', 'message': 'Prompt 构建完成', 'progress': 30}, ensure_ascii=False)}\n\n"
+
+            # 步骤4: 调用 chat_stream 进行 analyze-prd 任务
+            yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': '开始PRD模块分析...', 'progress': 35}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 获取沙箱服务（使用模块自己的 session_id）
+                sandbox_service = await session_manager.get_service(
+                    session_id=session_id,
+                    workspace_path=module_workspace_path,
+                )
+
+                logger.info(f"Starting analyze-prd task: session_id={session_id}, module={module_name}")
+
+                # 流式处理 analyze-prd 任务
+                async for chat_msg in sandbox_service.chat_stream(
+                    prompt=prompt,
+                    session_id=session_id,
+                    task_type="analyze-prd",
+                ):
+                    # 转发 chat 消息作为进度更新
+                    msg_dict = chat_msg.to_dict()
+
+                    # 根据消息类型调整进度展示
+                    if chat_msg.type in ("text", "text_delta"):
+                        # 文本消息，显示为 analyze_prd 进度（35-75%）
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': chat_msg.content[:100], 'progress': 55}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "tool_use":
+                        # 工具调用
+                        tool_name = msg_dict.get('tool_name', 'unknown')
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': f'正在执行: {tool_name}', 'progress': 65}, ensure_ascii=False)}\n\n"
+                    elif chat_msg.type == "error":
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'PRD分析失败: {chat_msg.content}'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    await asyncio.sleep(0.01)
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'success', 'message': 'PRD模块分析完成', 'progress': 75}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"PRD analyze failed: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'PRD分析失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤5: 读取生成的 clarification.md
+            yield f"data: {json.dumps({'type': 'step', 'step': 'read_clarification', 'status': 'progress', 'message': '读取生成的文档...', 'progress': 80}, ensure_ascii=False)}\n\n"
+
+            try:
+                # 根据文档，生成的文件路径为: {workspace_path}/docs/PRD-GEN/clarification.md
+                clarification_path = module_workspace_dir / "docs" / "PRD-GEN" / "clarification.md"
+
+                if not clarification_path.exists():
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'未找到文件: {clarification_path}'}, ensure_ascii=False)}\n\n"
+                    return
+
+                # 读取文件内容
+                clarification_content = clarification_path.read_text(encoding='utf-8')
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'read_clarification', 'status': 'success', 'message': '文档读取成功', 'progress': 85}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"Failed to read clarification.md: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'读取文档失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤6: 保存到 module.require_content
+            yield f"data: {json.dumps({'type': 'step', 'step': 'save_content', 'status': 'progress', 'message': '保存到模块...', 'progress': 90}, ensure_ascii=False)}\n\n"
+
+            try:
+                from app.db.schemas import ModuleUpdate
+                module_update = ModuleUpdate(require_content=clarification_content)
+                await self.module_repo.update_module(
+                    module_id=module.id,
+                    data=module_update
+                )
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'save_content', 'status': 'success', 'message': '内容保存成功', 'progress': 95}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"Failed to update module: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'保存失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤7: 返回结果
+            result_data = {
+                'type': 'complete',
+                'message': 'PRD模块分析完成',
+                'progress': 100,
+                'data': {
+                    'module_id': module.id,
+                    'module_name': module.name,
+                    'module_code': module.code,
+                    'clarification_content': clarification_content,
+                    'clarification_path': str(clarification_path.absolute()),
+                }
+            }
+
+            yield f"data: {json.dumps(result_data, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"analyze-prd stream failed: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+
+    async def prepare_and_generate_spec_stream(
+        self,
+        session_id: str,
+        created_by: Optional[str] = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        准备环境并生成 Spec（流式）
+
+        流程：
+        1. 根据 session_id 查找模块
+        2. 验证 project 是否有 git 地址和 token
+        3. 检查工作空间是否有代码
+           - 没有：拉取代码 → 检查容器阈值 → 创建容器 → 生成 spec
+           - 有：检查容器是否存在
+             - 没有：检查容器阈值 → 创建容器 → 生成 spec
+             - 有：直接生成 spec
+
+        Args:
+            session_id: 模块的 session_id
+            created_by: 创建者
+
+        Yields:
+            SSE格式的事件消息
+        """
+        version_id = None
+
+        try:
+            # 发送连接确认
+            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+            await asyncio.sleep(0)
+
+            # 步骤1: 查找模块
+            yield f"data: {json.dumps({'type': 'step', 'step': 'find_module', 'status': 'progress', 'message': '查找模块...', 'progress': 5}, ensure_ascii=False)}\n\n"
+
+            module = await self.module_repo.get_module_by_session_id(session_id=session_id)
+            if not module:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Session ID {session_id} 对应的模块不存在'}, ensure_ascii=False)}\n\n"
+                return
+
+            if module.type != ModuleType.POINT:
+                yield f"data: {json.dumps({'type': 'error', 'message': '只能为POINT类型模块生成Spec'}, ensure_ascii=False)}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'find_module', 'status': 'success', 'message': f'找到模块: {module.name}', 'progress': 10}, ensure_ascii=False)}\n\n"
+
+            # 步骤2: 验证 project
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_project', 'status': 'progress', 'message': '验证项目配置...', 'progress': 15}, ensure_ascii=False)}\n\n"
+
+            project = await self.project_repo.get_project_by_id(project_id=module.project_id)
+            if not project:
+                yield f"data: {json.dumps({'type': 'error', 'message': '关联的项目不存在'}, ensure_ascii=False)}\n\n"
+                return
+
+            if not project.codebase:
+                yield f"data: {json.dumps({'type': 'error', 'message': '项目没有配置 Git 地址'}, ensure_ascii=False)}\n\n"
+                return
+
+            if not project.token:
+                yield f"data: {json.dumps({'type': 'error', 'message': '项目没有配置 Git Token'}, ensure_ascii=False)}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'step', 'step': 'validate_project', 'status': 'success', 'message': '项目配置验证成功', 'progress': 20}, ensure_ascii=False)}\n\n"
+
+            # 步骤3: 检查工作空间
+            yield f"data: {json.dumps({'type': 'step', 'step': 'check_workspace', 'status': 'progress', 'message': '检查工作空间...', 'progress': 25}, ensure_ascii=False)}\n\n"
+
+            workspace_path = module.workspace_path
+            if not workspace_path:
+                yield f"data: {json.dumps({'type': 'error', 'message': '模块没有工作空间路径'}, ensure_ascii=False)}\n\n"
+                return
+
+            workspace_dir = Path(workspace_path)
+            has_code = workspace_dir.exists() and (workspace_dir / ".git").exists()
+
+            if has_code:
+                yield f"data: {json.dumps({'type': 'step', 'step': 'check_workspace', 'status': 'success', 'message': '工作空间已有代码', 'progress': 30}, ensure_ascii=False)}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'step', 'step': 'check_workspace', 'status': 'success', 'message': '工作空间无代码，需要拉取', 'progress': 30}, ensure_ascii=False)}\n\n"
+
+                # 步骤4: 拉取代码
+                yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'progress', 'message': '正在克隆代码仓库...', 'progress': 35}, ensure_ascii=False)}\n\n"
+
+                try:
+                    service = GitHubService(token=project.token)
+                    await service.clone_repo(
+                        repo_url=project.codebase,
+                        target_path=workspace_path,
+                        branch=module.branch or "main",
+                    )
+
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'success', 'message': '代码仓库克隆成功', 'progress': 45}, ensure_ascii=False)}\n\n"
+
+                    # 创建分支
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_branch', 'status': 'progress', 'message': '创建功能分支...', 'progress': 50}, ensure_ascii=False)}\n\n"
+
+                    branch_name = f"{module.branch or 'main'}-{session_id}"
+                    await service.create_branch(repo_path=workspace_path, branch_name=branch_name)
+
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_branch', 'status': 'success', 'message': '功能分支创建成功', 'progress': 55}, ensure_ascii=False)}\n\n"
+
+                except Exception as e:
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'代码拉取失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                    return
+
+            # 步骤5: 检查容器
+            yield f"data: {json.dumps({'type': 'step', 'step': 'check_container', 'status': 'progress', 'message': '检查容器状态...', 'progress': 60}, ensure_ascii=False)}\n\n"
+
+            executor = get_sandbox_executor()
+            container_exists = False
+
+            try:
+                # 尝试获取容器信息
+                container_info = await executor.get_container_info(session_id)
+                if container_info and container_info.get('status') == 'running':
+                    container_exists = True
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'check_container', 'status': 'success', 'message': '容器已存在且运行中', 'progress': 65}, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                logger.info(f"Container not found or not running: {e}")
+                yield f"data: {json.dumps({'type': 'step', 'step': 'check_container', 'status': 'success', 'message': '容器不存在，需要创建', 'progress': 65}, ensure_ascii=False)}\n\n"
+
+            # 步骤6: 如果容器不存在，创建容器
+            if not container_exists:
+                # 检查容器限制
+                yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'progress', 'message': '检查容器限制...', 'progress': 67}, ensure_ascii=False)}\n\n"
+
+                can_create, error_msg = await self._check_container_limit()
+                if not can_create:
+                    yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+                    return
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'success', 'message': '容器限制检查通过', 'progress': 69}, ensure_ascii=False)}\n\n"
+
+                # 创建容器
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'progress', 'message': '创建沙箱容器...', 'progress': 70}, ensure_ascii=False)}\n\n"
+
+                try:
+                    container_info = await executor.create_workspace(
+                        session_id=session_id,
+                        workspace_path=workspace_path
+                    )
+
+                    # 更新模块的 container_id
+                    module_update = ModuleUpdate(container_id=container_info["id"])
+                    await self.module_repo.update_module(module_id=module.id, data=module_update)
+
+                    container_id_short = container_info["id"][:12]
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'success', 'message': f'容器ID: {container_id_short}', 'progress': 75}, ensure_ascii=False)}\n\n"
+
+                except Exception as e:
+                    logger.error(f"Container creation failed: {e}")
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'容器创建失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                    return
+
+            # 步骤7: 创建 Version 记录
+            if module.require_content:
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 77}, ensure_ascii=False)}\n\n"
+
+                # 检查是否已有 SPEC_GENERATING 或 SPEC_GENERATED 状态的 Version
+                existing_version = await self.version_repo.get_version_by_module_and_status(
+                    module_id=module.id,
+                    status=VersionStatus.SPEC_GENERATING.value
+                )
+
+                if not existing_version:
+                    existing_version = await self.version_repo.get_version_by_module_and_status(
+                        module_id=module.id,
+                        status=VersionStatus.SPEC_GENERATED.value
+                    )
+
+                if existing_version:
+                    version_id = existing_version.id
+                    # 如果是 SPEC_GENERATED，更新回 SPEC_GENERATING
+                    if existing_version.status == VersionStatus.SPEC_GENERATED.value:
+                        await self._update_version_status(
+                            version_id=version_id,
+                            status=VersionStatus.SPEC_GENERATING
+                        )
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'success', 'message': f'使用已有Version: {version_id}', 'progress': 79}, ensure_ascii=False)}\n\n"
+                else:
+                    # 创建新 Version
+                    version_code = f"v1.0.0-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    version_data = VersionCreate(
+                        code=version_code,
+                        module_id=module.id,
+                        msg="[SpecCoding Auto Commit] - Spec generation",
+                        commit="pending",
+                        status=VersionStatus.SPEC_GENERATING.value
+                    )
+
+                    version = await self.version_repo.create_version(data=version_data, created_by=created_by)
+                    version_id = version.id
+
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'success', 'message': f'版本ID: {version_id}', 'progress': 79}, ensure_ascii=False)}\n\n"
+
+            # 步骤8: 生成 Spec
+            if module.require_content:
+                yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'progress', 'message': '正在生成技术规格文档...', 'progress': 80}, ensure_ascii=False)}\n\n"
+
+                message_queue = asyncio.Queue()
+                try:
+                    task = asyncio.create_task(generate_code_from_spec(
+                        spec_content=module.require_content,
+                        workspace_path=workspace_path,
+                        session_id=session_id,
+                        module_code=module.code,
+                        module_name=module.name,
+                        module_url=module.url,
+                        task_type="spec",
+                        message_queue=message_queue,
+                    ))
+
+                    buffer = ""
+                    while True:
+                        chunk = await message_queue.get()
+                        if chunk is None:
+                            if buffer:
+                                yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': buffer, 'progress': 85}, ensure_ascii=False)}\n\n"
+                            break
+
+                        buffer += chunk.content
+                        while "\n\n" in buffer:
+                            line, buffer = buffer.split("\n\n", 1)
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 85}, ensure_ascii=False)}\n\n"
+
+                    spec_content, msg_list, result = await task
+
+                    if spec_content:
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'spec_content': spec_content, 'progress': 90}, ensure_ascii=False)}\n\n"
+
+                        # 更新模块的 spec_content
+                        module_update = ModuleUpdate(spec_content=spec_content)
+                        await self.module_repo.update_module(module_id=module.id, data=module_update)
+
+                        # 更新 Version 状态为 SPEC_GENERATED
+                        if version_id:
+                            await self._update_version_status(
+                                version_id=version_id,
+                                status=VersionStatus.SPEC_GENERATED,
+                                spec_content=spec_content
+                            )
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'update_version_status', 'status': 'success', 'message': 'Version状态已更新为SPEC_GENERATED', 'progress': 95}, ensure_ascii=False)}\n\n"
+
+                        # 保存消息
+                        try:
+                            if msg_list:
+                                await message_repo.create_message(
+                                    session_id=session_id,
+                                    role='assistant',
+                                    content="".join(msg_list),
+                                    tool_name=None,
+                                    tool_input=None,
+                                    tool_result=None,
+                                )
+                            if result:
+                                await message_repo.create_message(
+                                    session_id=session_id,
+                                    role='assistant',
+                                    content="".join(result),
+                                    tool_name=None,
+                                    tool_input=None,
+                                    tool_result=None,
+                                )
+                        except Exception as e:
+                            logger.error(f"Failed to save messages: {e}", exc_info=True)
+
+                        # 完成
+                        yield f"data: {json.dumps({'type': 'complete', 'module_id': module.id, 'session_id': session_id, 'version_id': version_id, 'spec_content': spec_content, 'message': 'Spec生成完成'}, ensure_ascii=False)}\n\n"
+
+                    else:
+                        yield f"data: {json.dumps({'type': 'error', 'message': 'Spec文档生成失败'}, ensure_ascii=False)}\n\n"
+
+                except Exception as e:
+                    logger.error(f"Spec generation failed: {e}", exc_info=True)
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'Spec生成失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'error', 'message': '模块没有需求内容(require_content)'}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Prepare and generate spec failed: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)}'}, ensure_ascii=False)}\n\n"
 
