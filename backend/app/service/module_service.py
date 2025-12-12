@@ -136,7 +136,6 @@ class ModuleService:
 
             # 停止并删除容器
             await executor.stop_container(session_id)
-            await executor.remove_container(session_id)
 
             logger.info(f"Container cleanup completed for session {session_id}")
             return True
@@ -587,13 +586,13 @@ class ModuleService:
                     return
 
                 # 创建模块记录
-                module = await self.module_repo.create_module(data=ModuleCreate(**module_data), created_by=created_by)
+                module = await self.module_repo.create_module(data=module_data, created_by=created_by)
                 module_id = module.id
 
                 yield f"data: {json.dumps({'type': 'step', 'step': 'create_module', 'status': 'success', 'message': f'模块ID: {module_id}, URL_ID: {insert_id}', 'module_id': module_id, 'progress': 40})}\n\n"
 
                 # 步骤5: 检查并拉取代码
-                if project.codebase_url:
+                if project.codebase:
                     if not project.token:
                         yield f"data: {json.dumps({'type': 'error', 'message': '项目配置了Git地址但缺少Token'})}\n\n"
                         return
@@ -607,7 +606,7 @@ class ModuleService:
                         try:
                             service = GitHubService(token=project.token)
                             await service.clone_repo(
-                                repo_url=project.codebase_url,
+                                repo_url=project.codebase,
                                 target_path=workspace_path,
                                 branch=module_data.get("branch"),
                             )
@@ -638,7 +637,6 @@ class ModuleService:
                 if not can_create:
                     yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
                     return
-
                 yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'success', 'message': '容器限制检查通过', 'progress': 65})}\n\n"
 
                 # 步骤7: 创建沙箱容器
@@ -658,28 +656,6 @@ class ModuleService:
                     yield f"data: {json.dumps({'type': 'error', 'message': f'容器创建失败: {str(e)}'})}\n\n"
                     return
 
-                # 步骤5: 创建数据库记录
-                yield f"data: {json.dumps({'type': 'step', 'step': 'create_db_record', 'status': 'progress', 'message': '创建数据库记录...', 'progress': 70})}\n\n"
-
-                module = await self.module_repo.create_module(data=module_data, created_by=created_by)
-                await self.session_repo.create_session(
-                    session_id=session_id,
-                    name=project.code + '-' + data.code,
-                    workspace_path=workspace_path,
-                    github_repo_url=project.codebase,
-                    github_branch=data.branch or "main",
-                )
-                module_id = module.id
-
-                menu = {
-                    "full_name": module.name,
-                    "english_name": module.code,
-                    "url_address": module.url,
-                    "enable_mark": 1,
-                    "parent_id": url_parent_id,
-                    "sort_code": self.sort_code
-                }
-                insert_id = self.db.insert(table='sys_module', data=menu)
                 module_data.update({
                     "url_id": insert_id,
                     "preview_url": settings.preview_ip + ':' + str(container_info["code_port"]) + data.url,
@@ -687,38 +663,28 @@ class ModuleService:
                 logger.info(f"preview_url: {settings.preview_ip + ':' + str(container_info['code_port']) + data.url}")
                 await self.module_repo.update_module(module_id=module_id, data=module_data)
 
+
                 yield f"data: {json.dumps({'type': 'step', 'step': 'create_db_record', 'status': 'success', 'message': f'模块ID: {module_id}', 'module_id': module_id, 'progress': 75})}\n\n"
 
-                # 步骤5.5: 检查容器限制并创建 Version
-                if data.require_content:
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'progress', 'message': '检查容器限制...', 'progress': 76})}\n\n"
 
-                    # 检查容器数量
-                    can_create, error_msg = await self._check_container_limit()
-                    if not can_create:
-                        yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
-                        return
+                # 创建 Version 记录（初始状态：SPEC_GENERATING）
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 78})}\n\n"
 
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'success', 'message': '容器限制检查通过', 'progress': 77})}\n\n"
+                version_code = f"v1.0.0-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                version_data = VersionCreate(
+                    code=version_code,
+                    module_id=module_id,
+                    msg="[SpecCoding Auto Commit] - Initial spec generation",
+                    commit="pending",  # 暂时设置为 pending，后续更新
+                    status=VersionStatus.SPEC_GENERATING.value
+                )
 
-                    # 创建 Version 记录（初始状态：SPEC_GENERATING）
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 78})}\n\n"
+                version = await self.version_repo.create_version(data=version_data, created_by=created_by)
+                version_id = version.id
 
-                    version_code = f"v1.0.0-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                    version_data = VersionCreate(
-                        code=version_code,
-                        module_id=module_id,
-                        msg="[SpecCoding Auto Commit] - Initial spec generation",
-                        commit="pending",  # 暂时设置为 pending，后续更新
-                        status=VersionStatus.SPEC_GENERATING.value
-                    )
+                yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'success', 'message': f'版本ID: {version_id}', 'version_id': version_id, 'progress': 79})}\n\n"
 
-                    version = await self.version_repo.create_version(data=version_data, created_by=created_by)
-                    version_id = version.id
-
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'success', 'message': f'版本ID: {version_id}', 'version_id': version_id, 'progress': 79})}\n\n"
-
-                # 步骤6: 生成spec文档
+                # 步骤9: 生成spec文档
                 if data.require_content:
                     try:
                         await message_repo.create_message(
@@ -732,7 +698,7 @@ class ModuleService:
                     except Exception as e:
                         logger.error(f"Failed to save messages: {e}", exc_info=True)
 
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'progress', 'message': '正在生成技术规格文档...', 'progress': 80})}\n\n"
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'progress', 'message': '正在生成spec文档...', 'progress': 80})}\n\n"
 
                     message_queue = asyncio.Queue()
                     try:
@@ -1347,7 +1313,9 @@ class ModuleService:
                 version_update = VersionUpdate(
                     commit=commit_id,
                     status=VersionStatus.BUILD_COMPLETED.value,
-                    msg=f"{module.name} 代码构建完成: {content[:100]}"
+                    msg=f"{module.name} 代码构建完成: {content[:100]}",
+                    module_id=module.id,
+                    spec_content=spec_content,
                 )
                 await self.version_repo.update_version(
                     version_id=version_id,
@@ -2004,10 +1972,7 @@ class ModuleService:
                 from app.db.schemas import ProjectCreate
                 project_data = ProjectCreate(
                     code=project_code,
-                    name=project_name,
-                    description=f"{system_info.get('name_en', '')} - {system_info.get('version', '')}",
-                    codebase_url="",  # 暂不填写
-                    branch="main",
+                    name=project_name
                 )
 
                 project = await self.project_repo.create_project(data=project_data)
@@ -2036,9 +2001,10 @@ class ModuleService:
                     name=feature_data.get('name_zh', 'Unnamed Module'),
                     code=module_code,
                     type=module_type,
-                    url=feature_data.get('url', '/'),
-                    require_content=f"{feature_data.get('name_en', '')}",
+                    url=feature_data.get('url', '/')
                 )
+                module_data = module_data.model_dump()
+                module_data.pop('url_parent_id')
 
                 # 如果是 POINT 类型，生成 session_id 和 workspace_path
                 if module_type == ModuleType.POINT:
@@ -2048,11 +2014,12 @@ class ModuleService:
                     # 创建 workspace 目录
                     workspace_dir = Path(workspace_path)
                     workspace_dir.mkdir(parents=True, exist_ok=True)
-
-                    module_data.session_id = session_id
-                    module_data.workspace_path = workspace_path
-                    module_data.branch = "main"
-                    module_data.is_active = 1
+                    module_data.update({
+                        'session_id': session_id,
+                        'workspace_path': workspace_path,
+                        'branch': 'main',
+                        'is_active': 1,
+                    })
 
                     logger.info(f"POINT module: {module_code}, session_id: {session_id}, workspace: {workspace_path}")
 
@@ -2083,7 +2050,7 @@ class ModuleService:
                         logger.info(f"Inserted sys_module: {module_code}, url_id: {insert_id}")
 
                         # 将 url_id 添加到模块数据中
-                        module_data.url_id = insert_id
+                        module_data.update({'url_id': insert_id})
                         current_url_id = insert_id
 
                     except Exception as e:
@@ -2373,7 +2340,7 @@ class ModuleService:
                 yield f"data: {json.dumps({'type': 'error', 'message': '关联的项目不存在'}, ensure_ascii=False)}\n\n"
                 return
 
-            if not project.codebase_url:
+            if not project.codebase:
                 yield f"data: {json.dumps({'type': 'error', 'message': '项目没有配置 Git 地址'}, ensure_ascii=False)}\n\n"
                 return
 
@@ -2405,7 +2372,7 @@ class ModuleService:
                 try:
                     service = GitHubService(token=project.token)
                     await service.clone_repo(
-                        repo_url=project.codebase_url,
+                        repo_url=project.codebase,
                         target_path=workspace_path,
                         branch=module.branch or "main",
                     )

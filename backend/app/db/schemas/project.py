@@ -11,19 +11,19 @@ from pydantic import BaseModel, Field, field_validator
 
 class ProjectBase(BaseModel):
     """Project base schema"""
-    code: str = Field(..., max_length=64, description="项目代码，英文+数字，不区分大小写")
-    name: str = Field(..., max_length=255, description="项目名称")
-    codebase: str = Field(..., max_length=512, description="Git仓库地址")
-    token: str = Field(..., max_length=512, description="Git认证令牌")
-    owner: str = Field(..., description="持有者ID")
+    code: str = Field(..., max_length=512, description="项目代码，不区分大小写")
+    name: str = Field(..., max_length=512, description="项目名称")
+    codebase: str = Field(None, max_length=512, description="Git仓库地址")
+    token: str = Field(None, max_length=512, description="Git认证令牌")
+    owner: str = Field(None, description="持有者ID")
 
-    @field_validator("code")
-    @classmethod
-    def code_alphanumeric(cls, v: str) -> str:
-        """Validate code is alphanumeric"""
-        if not v.replace("_", "").replace("-", "").isalnum():
-            raise ValueError("Project code must be alphanumeric (underscores and hyphens allowed)")
-        return v.upper()  # Store in uppercase for case-insensitive comparison
+    # @field_validator("code")
+    # @classmethod
+    # def code_alphanumeric(cls, v: str) -> str:
+    #     """Validate code is alphanumeric"""
+    #     if not v.replace("_", "").replace("-", "").isalnum():
+    #         raise ValueError("Project code must be alphanumeric (underscores and hyphens allowed)")
+    #     return v.upper()  # Store in uppercase for case-insensitive comparison
 
 
 class ProjectCreate(ProjectBase):
@@ -33,8 +33,8 @@ class ProjectCreate(ProjectBase):
 
 class ProjectUpdate(BaseModel):
     """Schema for updating a project"""
-    code: Optional[str] = Field(None, max_length=64, description="项目代码")
-    name: Optional[str] = Field(None, max_length=255, description="项目名称")
+    code: Optional[str] = Field(None, max_length=512, description="项目代码")
+    name: Optional[str] = Field(None, max_length=512, description="项目名称")
     codebase: Optional[str] = Field(None, max_length=512, description="Git仓库地址")
     token: Optional[str] = Field(None, max_length=512, description="Git认证令牌")
     owner: Optional[str] = Field(None, description="持有者ID")
