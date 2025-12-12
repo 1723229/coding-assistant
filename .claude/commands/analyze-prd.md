@@ -25,6 +25,7 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
    - `--feature-tree`: Path to FEATURE_TREE.md file (e.g., "docs/PRD-Gen/FEATURE_TREE.md")
    - `--prd`: Path to original PRD document (PDF/Markdown/Text)
 2. Read `openspec/PRD_ANALYSIS_STANDARD.md` to understand the analysis standard
+3. Read `openspec/COMMON_KNOWLEDGE.md` to collect common knowledges related
 
 **Steps**
 

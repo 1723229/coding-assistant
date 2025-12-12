@@ -1,9 +1,6 @@
 # Capability: PRD Analysis & Clarification (`/analyze-prd`)
 
 > **Purpose:** A self-contained workflow to convert a vague Product Requirement Document (PRD) into a structured clarification list **compatible with OpenSpec proposal format**.
-> **Trigger:** When a user provides a PRD (and only a PRD).
-> **Input:** PRD File (PDF/Text).
-> **Output:** `drafts/context.md` (for PDM to fill) - structured to enable direct conversion to OpenSpec `proposal.md`, `tasks.md`, and `specs/*.md`.
 > **Key Constraint:** Every clarification question must serve the goal of writing **testable Scenarios** in `WHEN...THEN` format.
 
 ## 1. The "OpenSpec-Ready" Analysis Algorithm
@@ -82,9 +79,9 @@ The Agent MUST apply the following **four-pass analysis** (derived from team gui
 
 ---
 
-## 2. The Standard Output Template (`openspec/prd-context.md`)
+## 2. The Standard Output Template
 
-The Agent MUST generate a file named `openspec/prd-context.md` using the specific structure below. Use "Fill-in-the-blanks" format (Code blocks or Quotes) for PDM convenience.
+The Agent MUST generate a file using the specific structure below. Use "Fill-in-the-blanks" format (Code blocks or Quotes) for PDM convenience.
 
 **Key Principle:** Every section must map to either `proposal.md`, `tasks.md`, `design.md`, or `specs/*.md` in OpenSpec format.
 
@@ -141,10 +138,6 @@ For each feature in the PRD, describe what it does:
 > - As a quality manager, I want to query defect counts by process, so that I can identify problem areas
 > - As a production supervisor, I want to see trend analysis, so that I can predict quality issues
 > - As a...
-
-**🚨 OpenSpec Testability Check:**
-- [ ] Can this requirement be tested with concrete scenarios?
-- [ ] Are there clear success criteria?
 
 #### Feature 2: [Next feature...]
 (Repeat structure above)
