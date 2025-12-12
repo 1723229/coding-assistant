@@ -118,3 +118,51 @@ class VersionRepository(BaseRepository[Version, VersionCreate, VersionUpdate]):
         ).order_by(Version.create_time.desc()).limit(1)
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+    @async_with_session
+    async def count_running_containers(self, session: AsyncSession) -> int:
+        """
+        统计当前运行中的容器数量
+
+        运行中的容器对应的状态：
+        - SPEC_GENERATING: Spec生成中
+        - CODE_BUILDING: 代码构建中
+
+        Returns:
+            运行中的容器数量
+        """
+        from app.db.models.version import VersionStatus
+        from sqlalchemy import func
+
+        stmt = select(func.count(Version.id)).where(
+            Version.status.in_([
+                VersionStatus.SPEC_GENERATING.value,
+                VersionStatus.CODE_BUILDING.value
+            ])
+        )
+        result = await session.execute(stmt)
+        return result.scalar() or 0
+
+    @async_with_session
+    async def get_version_by_module_and_status(
+        self,
+        session: AsyncSession,
+        module_id: int,
+        status: str
+    ) -> Optional[Version]:
+        """
+        根据 module_id 和状态获取 Version
+
+        Args:
+            module_id: 模块ID
+            status: 版本状态
+
+        Returns:
+            Version 对象或 None
+        """
+        stmt = select(Version).where(
+            Version.module_id == module_id,
+            Version.status == status
+        ).order_by(Version.create_time.desc()).limit(1)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()

@@ -77,3 +77,8 @@ executor:
 #  anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic"
 #  anthropic_model: "qwen3-coder-plus"
 
+# Container Management
+container:
+  max_running_containers: 1  # 最大运行容器数量阈值
+
+
