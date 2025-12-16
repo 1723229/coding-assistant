@@ -61,6 +61,26 @@ class ModuleService:
       database="framework"
   )
 
+    def _find_prd_gen_dir(self, workspace_dir: Path) -> Path:
+        """
+        查找不区分大小写的 PRD-GEN 目录
+
+        Args:
+            workspace_dir: workspace 根目录
+
+        Returns:
+            PRD-GEN 目录的 Path 对象（如果不存在则返回默认路径）
+        """
+        docs_dir = workspace_dir / "docs"
+
+        if docs_dir.exists() and docs_dir.is_dir():
+            for item in docs_dir.iterdir():
+                if item.is_dir() and item.name.upper() == "PRD-GEN":
+                    return item
+
+        # 回退到默认路径
+        return workspace_dir / "docs" / "PRD-GEN"
+
     async def _check_container_limit(self) -> tuple[bool, str]:
         """
         检查容器数量是否达到阈值
@@ -1572,7 +1592,8 @@ class ModuleService:
 
             try:
                 # 根据文档，生成的文件路径为: {workspace_path}/docs/PRD-GEN/
-                prd_gen_dir = workspace_dir / "docs" / "PRD-GEN"
+                # 支持不区分大小写查找 PRD-GEN 目录
+                prd_gen_dir = self._find_prd_gen_dir(workspace_dir)
                 feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
                 metadata_path = prd_gen_dir / "METADATA.json"
 
@@ -1676,7 +1697,7 @@ class ModuleService:
 
             # 检查必要文件是否存在
             prd_file_path = workspace_dir / "prd.md"
-            prd_gen_dir = workspace_dir / "docs" / "PRD-GEN"
+            prd_gen_dir = self._find_prd_gen_dir(workspace_dir)
             feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
             metadata_path = prd_gen_dir / "METADATA.json"
 
@@ -1822,7 +1843,7 @@ class ModuleService:
 
             # 检查必要文件是否存在
             prd_file_path = workspace_dir / "prd.md"
-            prd_gen_dir = workspace_dir / "docs" / "PRD-GEN"
+            prd_gen_dir = self._find_prd_gen_dir(workspace_dir)
             feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
             metadata_path = prd_gen_dir / "METADATA.json"
 
@@ -1943,7 +1964,8 @@ class ModuleService:
         try:
             # 步骤1: 读取 METADATA.json
             workspace_dir = Path.home() / "workspace" / session_id
-            metadata_path = workspace_dir / "docs" / "PRD-GEN" / "METADATA.json"
+            prd_gen_dir = self._find_prd_gen_dir(workspace_dir)
+            metadata_path = prd_gen_dir / "METADATA.json"
 
             if not metadata_path.exists():
                 return BaseResponse.error(message=f"未找到文件: {metadata_path}")
@@ -2160,7 +2182,7 @@ class ModuleService:
             yield f"data: {json.dumps({'type': 'step', 'step': 'validate_prd', 'status': 'progress', 'message': '验证PRD文件...', 'progress': 15}, ensure_ascii=False)}\n\n"
 
             prd_workspace_dir = Path.home() / "workspace" / prd_session_id
-            prd_gen_dir = prd_workspace_dir / "docs" / "PRD-GEN"
+            prd_gen_dir = self._find_prd_gen_dir(prd_workspace_dir)
             feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
             prd_file_path = prd_workspace_dir / "prd.md"
 
@@ -2227,7 +2249,8 @@ class ModuleService:
 
             try:
                 # 根据文档，生成的文件路径为: {workspace_path}/docs/PRD-GEN/clarification.md
-                clarification_path = module_workspace_dir / "docs" / "PRD-GEN" / "clarification.md"
+                prd_gen_dir = self._find_prd_gen_dir(module_workspace_dir)
+                clarification_path = prd_gen_dir / "clarification.md"
 
                 if not clarification_path.exists():
                     yield f"data: {json.dumps({'type': 'error', 'message': f'未找到文件: {clarification_path}'}, ensure_ascii=False)}\n\n"
