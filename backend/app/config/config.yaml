@@ -29,6 +29,14 @@ database:
   read_timeout: 60
   write_timeout: 60
 
+# Framework Database Configuration (for sys_module table)
+framework_database:
+  host: "172.27.1.37"
+  port: 3306
+  user: "root"
+  password: "123456"
+  database: "framework"
+
 # GitHub Configuration
 github:
   token: "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"

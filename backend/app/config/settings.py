@@ -78,6 +78,22 @@ class DatabaseConfig:
 
 
 # ============================================================================
+# Framework Database Configuration
+# ============================================================================
+
+class FrameworkDatabaseConfig:
+    """Framework database configuration (for sys_module table)"""
+
+    _framework_db_config = _config.get("framework_database", {})
+
+    HOST = _framework_db_config.get("host", "localhost")
+    PORT = _framework_db_config.get("port", 3306)
+    USER = _framework_db_config.get("user", "root")
+    PASSWORD = _framework_db_config.get("password", "")
+    DATABASE = _framework_db_config.get("database", "framework")
+
+
+# ============================================================================
 # Server Configuration
 # ============================================================================
 
@@ -265,6 +281,7 @@ def get_settings() -> Settings:
 __all__ = [
     "load_yaml_config",
     "DatabaseConfig",
+    "FrameworkDatabaseConfig",
     "ServerConfig",
     "GitHubConfig",
     "WorkspaceConfig",
