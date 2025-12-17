@@ -662,7 +662,8 @@ class ModuleService:
                     else:
                         yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'success', 'message': '工作空间已有代码，跳过克隆', 'progress': 60})}\n\n"
                 else:
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'skipped', 'message': '项目未配置Git地址，跳过代码拉取', 'progress': 60})}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'message': '项目未配置Git地址，请配置好仓库信息和token', 'progress': 60})}\n\n"
+                    return
 
                 # 步骤6: 检查容器阈值
                 yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'progress', 'message': '检查容器限制...', 'progress': 62})}\n\n"
