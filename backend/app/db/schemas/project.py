@@ -13,9 +13,9 @@ class ProjectBase(BaseModel):
     """Project base schema"""
     code: str = Field(..., max_length=512, description="项目代码，不区分大小写")
     name: str = Field(..., max_length=512, description="项目名称")
-    codebase: str = Field(None, max_length=512, description="Git仓库地址")
-    token: str = Field(None, max_length=512, description="Git认证令牌")
-    owner: str = Field(None, description="持有者ID")
+    codebase: Optional[str]  = Field(None, max_length=512, description="Git仓库地址")
+    token: Optional[str]  = Field(None, max_length=512, description="Git认证令牌")
+    owner: Optional[str]  = Field(None, description="持有者ID")
 
     # @field_validator("code")
     # @classmethod
