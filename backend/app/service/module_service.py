@@ -17,6 +17,7 @@ from fastapi import Query, UploadFile
 from app.api.chat_router import module_repo
 from app.config.logging_config import log_print
 from app.config import get_settings
+from app.config.settings import FrameworkDatabaseConfig
 from app.utils.model.response_model import BaseResponse, ListResponse
 from app.db.repository import ModuleRepository, ProjectRepository, VersionRepository, SessionRepository, \
     MessageRepository
@@ -54,12 +55,12 @@ class ModuleService:
         self.session_repo = SessionRepository()
         self.agent_service = AgentService()
         self.db = MySQLUtil(
-      host="172.27.1.37",
-      port=3306,
-      user="root",
-      password="123456",
-      database="framework"
-  )
+            host=FrameworkDatabaseConfig.HOST,
+            port=FrameworkDatabaseConfig.PORT,
+            user=FrameworkDatabaseConfig.USER,
+            password=FrameworkDatabaseConfig.PASSWORD,
+            database=FrameworkDatabaseConfig.DATABASE
+        )
 
     def _find_prd_gen_dir(self, workspace_dir: Path) -> Path:
         """
