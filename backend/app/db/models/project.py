@@ -18,8 +18,8 @@ class Project(Base, BaseModel):
     __tablename__ = "code_project"
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True, comment="Primary Key ID")
-    code = Column(String(64), nullable=False, unique=True, comment="项目代码，英文+数字，不区分大小写")
-    name = Column(String(255), nullable=False, comment="项目名称")
+    code = Column(String(512), nullable=False, unique=True, comment="项目代码，英文+数字，不区分大小写")
+    name = Column(String(512), nullable=False, comment="项目名称")
     codebase = Column(String(512), nullable=True, comment="Git仓库地址")
     token = Column(String(512), nullable=True, comment="Git认证令牌")
     owner = Column(String(512), nullable=True, comment="持有者ID")
