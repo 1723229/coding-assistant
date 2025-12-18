@@ -17,6 +17,7 @@ class VersionStatus(str, Enum):
     SPEC_GENERATED = "spec_generated"    # Spec已生成
     CODE_BUILDING = "code_building"      # 代码构建中（容器运行）
     BUILD_COMPLETED = "build_completed"  # 构建完成（容器销毁）
+    DELETED = "deleted"  # 删除module
 
 
 class Version(Base, BaseModel):

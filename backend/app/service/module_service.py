@@ -928,40 +928,96 @@ class ModuleService:
 
     @log_print
     async def delete_module(self, module_id: int):
-        """删除模块（级联删除子模块，清理 POINT 类型的 workspace 和容器）"""
+        """
+        删除模块（递归删除子模块，清理所有相关资源）
+
+        清理内容：
+        1. 递归删除所有子模块
+        2. 删除 framework 数据库中的 sys_module 记录
+        3. 对于 POINT 类型模块：
+           - 停止并删除容器
+           - 删除工作空间目录
+           - 将所有版本记录状态改为 DELETED
+        4. 删除模块数据库记录
+        """
         try:
             module = await self.module_repo.get_module_by_id(module_id=module_id)
             if not module:
                 return BaseResponse.not_found(message=f"模块 ID {module_id} 不存在")
 
-            # Clean up POINT type resources
-            if module.type == ModuleType.POINT:
-                # Clean up container if exists
-                if module.session_id:
+            # 递归删除函数
+            async def delete_module_recursive(mod: any) -> None:
+                """递归删除模块及其所有子模块"""
+                # 1. 先递归删除所有子模块
+                children = await self.module_repo.get_children_modules(parent_id=mod.id)
+                for child in children:
+                    await delete_module_recursive(child)
+
+                logger.info(f"Deleting module: {mod.name} (ID: {mod.id}, Type: {mod.type})")
+
+                # 2. 删除 framework 数据库中的 sys_module 记录
+                if mod.url_id:
                     try:
-                        # executor = get_sandbox_executor()
-                        # await executor.stop_container(module.session_id)
-                        logger.info(f"Stopped container for session: {module.session_id}")
+                        self.db.execute_update("DELETE FROM sys_module WHERE id=%s", (mod.url_id,))
+                        logger.info(f"Deleted sys_module record: url_id={mod.url_id}")
                     except Exception as e:
-                        logger.warning(f"Failed to stop container: {e}")
+                        logger.warning(f"Failed to delete sys_module record: {e}")
 
-                # Clean up workspace directory
-                if module.workspace_path:
+                # 3. 处理 POINT 类型模块的特殊资源
+                if mod.type == ModuleType.POINT:
+                    # 3.1 停止并删除容器
+                    if mod.session_id:
+                        try:
+                            executor = get_sandbox_executor()
+                            await executor.stop_container(mod.session_id)
+                            logger.info(f"Stopped and deleted container for session: {mod.session_id}")
+                        except Exception as e:
+                            logger.warning(f"Failed to stop container: {e}")
+
+                    # 3.2 删除工作空间目录
+                    if mod.workspace_path:
+                        try:
+                            import shutil
+                            workspace = Path(mod.workspace_path)
+                            if workspace.exists():
+                                shutil.rmtree(workspace)
+                                logger.info(f"Removed workspace: {mod.workspace_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to remove workspace: {e}")
+
+                    # 3.3 将所有版本记录状态改为 DELETED
                     try:
-                        import shutil
-                        workspace = Path(module.workspace_path)
-                        if workspace.exists():
-                            shutil.rmtree(workspace)
-                            logger.info(f"Removed workspace: {module.workspace_path}")
+                        from app.db.models.version import VersionStatus
+                        versions = await self.version_repo.get_versions_by_module(
+                            module_id=mod.id,
+                            skip=0,
+                            limit=1000  # 获取所有版本
+                        )
+
+                        for version in versions:
+                            if version.status != VersionStatus.DELETED.value:
+                                from app.db.schemas import VersionUpdate
+                                version_update = VersionUpdate(
+                                    status=VersionStatus.DELETED.value
+                                )
+                                await self.version_repo.update_version(
+                                    version_id=version.id,
+                                    data=version_update
+                                )
+
+                        if versions:
+                            logger.info(f"Updated {len(versions)} version records to DELETED status for module {mod.id}")
                     except Exception as e:
-                        logger.warning(f"Failed to remove workspace: {e}")
+                        logger.warning(f"Failed to update version status: {e}")
 
-            # Delete module from database (cascades to children)
-            await self.module_repo.delete_module(module_id=module_id)
-            self.db.execute_update("DELETE FROM sys_module WHERE id=%s", module.url_id)
-            self.db.execute_update("DELETE FROM sys_module WHERE parent_id=%s", module.url_id)
+                # 4. 删除模块数据库记录
+                await self.module_repo.delete_module(module_id=mod.id)
+                logger.info(f"Deleted module from database: {mod.name} (ID: {mod.id})")
 
-            return BaseResponse.success(message="模块删除成功")
+            # 开始递归删除
+            await delete_module_recursive(module)
+
+            return BaseResponse.success(message=f"模块 '{module.name}' 及其子模块已成功删除")
         except Exception as e:
             logger.error(f"删除模块失败: {e}", exc_info=True)
             return BaseResponse.error(message=f"删除模块失败: {str(e)}")
