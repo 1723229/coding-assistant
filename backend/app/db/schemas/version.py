@@ -49,7 +49,7 @@ class VersionUpdate(BaseModel):
     commit: Optional[str] = Field(None, max_length=64, description="Git commit ID")
     status: Optional[str] = Field(None, max_length=64, description="状态")
     spec_content: Optional[str] = Field(None, max_length=10000, description="spec内容")
-    module_id: Optional[int] = Field(..., description="所属模块ID")
+    module_id: Optional[int] = Field(None, description="所属模块ID")
 
     @field_validator("commit")
     @classmethod
