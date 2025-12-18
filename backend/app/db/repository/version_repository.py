@@ -137,6 +137,7 @@ class VersionRepository(BaseRepository[Version, VersionCreate, VersionUpdate]):
         stmt = select(func.count(Version.id)).where(
             Version.status.in_([
                 VersionStatus.SPEC_GENERATING.value,
+                VersionStatus.SPEC_GENERATED.value,
                 VersionStatus.CODE_BUILDING.value
             ])
         )
