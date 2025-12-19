@@ -2498,7 +2498,7 @@ class ModuleService:
                     # 获取 preview_url
                     code_port = container_info.get('code_port')
                     if code_port:
-                        preview_url = f"{settings.preview_ip}:{code_port}/{module.url}"
+                        preview_url = f"{settings.preview_ip}:{code_port}{module.url}"
 
                     yield f"data: {json.dumps({'type': 'step', 'step': 'check_container', 'status': 'success', 'message': '容器已存在且运行中', 'preview_url': preview_url, 'progress': 65}, ensure_ascii=False)}\n\n"
             except Exception as e:
@@ -2530,7 +2530,7 @@ class ModuleService:
                     # 获取 preview_url
                     code_port = container_info.get('code_port')
                     if code_port:
-                        preview_url = f"{settings.preview_ip}:{code_port}/{module.url}"
+                        preview_url = f"{settings.preview_ip}:{code_port}{module.url}"
 
                     # 更新模块的 container_id和preview_url
                     module_update = ModuleUpdate(container_id=container_info["id"], preview_url=preview_url)
