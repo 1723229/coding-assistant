@@ -39,7 +39,7 @@ class ModuleUpdate(BaseModel):
     code: Optional[str] = Field(None, max_length=64, description="模块代码")
     url: Optional[str] = Field(None, max_length=512, description="菜单")
     require_content: Optional[str] = Field(None, description="功能需求描述")
-    # preview_url: Optional[str] = Field(None, max_length=512, description="预览页面，前端不操作")
+    preview_url: Optional[str] = Field(None, max_length=512, description="预览页面，前端不操作")
     branch: Optional[str] = Field(None, max_length=128, description="Git分支（仅POINT类型）")
     container_id: Optional[str] = Field(None, max_length=512, description="容器id")
     latest_commit_id: Optional[str] = Field(None, max_length=64, description="最新commit ID（仅POINT类型）")
