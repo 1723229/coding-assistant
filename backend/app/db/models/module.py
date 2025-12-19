@@ -33,7 +33,7 @@ class Module(Base, BaseModel):
     name = Column(String(255), nullable=False, comment="模块名称")
     code = Column(String(64), nullable=False, comment="模块代码，在Project内唯一")
     url = Column(String(512), nullable=True, comment="可访问的链接（NODE类型与子节点共享）")
-    require_content = Column(String(2000), nullable=True, comment="功能需求描述")
+    require_content = Column(LONGTEXT, nullable=True, comment="功能需求描述")
     preview_url = Column(String(512), nullable=True, comment="预览页面URL")
     spec_file_path = Column(String(512), nullable=True, comment="spec_file_path")
     spec_content = Column(LONGTEXT, nullable=True, comment="spec_content")

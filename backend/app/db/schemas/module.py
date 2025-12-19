@@ -18,7 +18,7 @@ class ModuleBase(BaseModel):
     name: str = Field(..., max_length=255, description="模块名称")
     code: str = Field(..., max_length=64, description="模块代码，在Project内唯一")
     url: Optional[str] = Field(None, max_length=512, description="可访问的链接（NODE类型与子节点共享）")
-    require_content: Optional[str] = Field(None, max_length=2000, description="功能需求描述")
+    require_content: Optional[str] = Field(None, description="功能需求描述")
     # preview_url: Optional[str] = Field(None, max_length=512, description="预览页面，前端不操作")
 
     # POINT 类型的字段（创建时可选）
@@ -38,7 +38,7 @@ class ModuleUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255, description="模块名称")
     code: Optional[str] = Field(None, max_length=64, description="模块代码")
     url: Optional[str] = Field(None, max_length=512, description="菜单")
-    require_content: Optional[str] = Field(None, max_length=2000, description="功能需求描述")
+    require_content: Optional[str] = Field(None, description="功能需求描述")
     # preview_url: Optional[str] = Field(None, max_length=512, description="预览页面，前端不操作")
     branch: Optional[str] = Field(None, max_length=128, description="Git分支（仅POINT类型）")
     container_id: Optional[str] = Field(None, max_length=512, description="容器id")
