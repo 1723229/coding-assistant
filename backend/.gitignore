@@ -51,7 +51,9 @@ logs/
 
 # Configuration (keep example files)
 app/config/config.yaml
+app/config/config.local.yaml
 !app/config/config.example.yaml
+!app/config/config.local.yaml
 
 # Workspace
 workspaces/

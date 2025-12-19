@@ -15,6 +15,7 @@ from fastapi import APIRouter, Query, Path, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 from app.service.module_service import ModuleService
 from app.db.schemas import ModuleCreate, ModuleUpdate
+from app.utils import BaseResponse
 
 logger = logging.getLogger(__name__)
 
@@ -424,7 +425,11 @@ async def create_modules_from_metadata(
     示例:
     - session_id: "abc123"
     """
-    return await module_service.create_modules_from_metadata(session_id=session_id)
+    data =  await module_service.create_modules_from_metadata(session_id=session_id)
+    return BaseResponse.success(
+        data=data,
+        message=f"成功创建项目和 {data.get("module_count")} 个模块"
+    )
 
 
 @module_router.post(
@@ -490,6 +495,7 @@ async def analyze_prd_module_stream(
 )
 async def prepare_and_generate_spec_stream(
     session_id: str = Query(..., description="模块的session_id"),
+    content: str = Query(None, description="需求内容")
 ):
     """
     准备环境并生成 Spec（流式）
@@ -521,10 +527,12 @@ async def prepare_and_generate_spec_stream(
 
     示例:
     - session_id: "module-uuid-123"
+    - content: ""
     """
     return StreamingResponse(
         module_service.prepare_and_generate_spec_stream(
             session_id=session_id,
+            content=content
         ),
         media_type="text/event-stream",
         headers={

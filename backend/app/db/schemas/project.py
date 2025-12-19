@@ -16,6 +16,7 @@ class ProjectBase(BaseModel):
     codebase: Optional[str]  = Field(None, max_length=512, description="Git仓库地址")
     token: Optional[str]  = Field(None, max_length=512, description="Git认证令牌")
     owner: Optional[str]  = Field(None, description="持有者ID")
+    prd_session_id: Optional[str]  = Field(None, description="prd文件的session_id")
 
     # @field_validator("code")
     # @classmethod
@@ -38,6 +39,7 @@ class ProjectUpdate(BaseModel):
     codebase: Optional[str] = Field(None, max_length=512, description="Git仓库地址")
     token: Optional[str] = Field(None, max_length=512, description="Git认证令牌")
     owner: Optional[str] = Field(None, description="持有者ID")
+    prd_session_id: Optional[str] = Field(None, description="prd文件的session_id")
 
     @field_validator("code")
     @classmethod

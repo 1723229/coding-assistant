@@ -26,7 +26,6 @@ from app.db.models.module import ModuleType
 from app.db.models.version import VersionStatus
 from app.core.executor import get_sandbox_executor
 from app.core.github_service import GitHubService
-from app.core.sandbox_service import SandboxService, session_manager
 from app.utils.mysql_util import MySQLUtil
 from datetime import datetime
 from app.utils.prompt.prompt_build import generate_code_from_spec
@@ -1616,6 +1615,7 @@ class ModuleService:
                 logger.info(f"Starting prd-decompose task: session_id={session_id}, prompt={prompt}")
 
                 # 流式处理 prd-decompose 任务
+                buffer = ""
                 async for chat_msg in self.agent_service.chat_stream(
                     prompt=prompt,
                     session_id=session_id,
@@ -1626,17 +1626,24 @@ class ModuleService:
 
                     # 根据消息类型调整进度展示
                     if chat_msg.type in ("text", "text_delta"):
-                        # 文本消息，显示为 prd_decompose 进度（35-80%）
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'progress', 'message': chat_msg.content[:100], 'progress': 50}, ensure_ascii=False)}\n\n"
+                        # 文本消息，累加到缓冲区，按 \n\n 分隔输出
+                        buffer += chat_msg.content
+                        while "\n\n" in buffer:
+                            line, buffer = buffer.split("\n\n", 1)
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 50}, ensure_ascii=False)}\n\n"
                     elif chat_msg.type == "tool_use":
-                        # 工具调用
+                        # 工具调用，打印日志
                         tool_name = msg_dict.get('tool_name', 'unknown')
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'progress', 'message': f'正在执行: {tool_name}', 'progress': 60}, ensure_ascii=False)}\n\n"
+                        logger.info(f"Tool use: {tool_name}")
                     elif chat_msg.type == "error":
                         yield f"data: {json.dumps({'type': 'error', 'message': f'PRD分解失败: {chat_msg.content}'}, ensure_ascii=False)}\n\n"
                         return
 
                     await asyncio.sleep(0.01)
+
+                # 最后 flush 剩余内容（即使没有 \n\n）
+                if buffer:
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': buffer, 'progress': 50}, ensure_ascii=False)}\n\n"
 
                 yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'success', 'message': 'PRD分解任务完成', 'progress': 80}, ensure_ascii=False)}\n\n"
 
@@ -1682,7 +1689,8 @@ class ModuleService:
                 yield f"data: {json.dumps({'type': 'error', 'message': f'读取生成文件失败: {str(e)}'}, ensure_ascii=False)}\n\n"
                 return
 
-            # 步骤6: 返回结果
+            # 步骤6: 创建项目和节点
+            data = await self.create_modules_from_metadata(session_id=session_id)
             result_data = {
                 'type': 'complete',
                 'message': 'PRD处理完成',
@@ -1693,6 +1701,7 @@ class ModuleService:
                     'prd_path': str(prd_file_path.absolute()),
                     'feature_tree_path': str(feature_tree_path.absolute()),
                     'metadata_path': str(metadata_path.absolute()),
+                    'project_id': data['project_id']
                 }
             }
 
@@ -2051,7 +2060,8 @@ class ModuleService:
                 from app.db.schemas import ProjectCreate
                 project_data = ProjectCreate(
                     code=project_code,
-                    name=project_name
+                    name=project_name,
+                    prd_session_id=session_id,
                 )
 
                 project = await self.project_repo.create_project(data=project_data)
@@ -2167,14 +2177,11 @@ class ModuleService:
             for feature in features:
                 await create_module_tree(feature, parent_id=None, url_parent_id=None, level=0)
 
-            return BaseResponse.success(
-                data={
+            return {
                     'project_id': project_id,
                     'project_name': project_name,
                     'module_count': module_count
-                },
-                message=f"成功创建项目和 {module_count} 个模块"
-            )
+                }
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse METADATA.json: {e}", exc_info=True)
@@ -2218,15 +2225,6 @@ class ModuleService:
 
             # 步骤1: 验证模块的 session_id 和 workspace
             yield f"data: {json.dumps({'type': 'step', 'step': 'validate_module', 'status': 'progress', 'message': '验证模块信息...', 'progress': 5}, ensure_ascii=False)}\n\n"
-
-            # 构建模块的 workspace 路径
-            module_workspace_dir = Path.home() / "workspace" / session_id
-
-            if not module_workspace_dir.exists():
-                yield f"data: {json.dumps({'type': 'error', 'message': f'模块 session {session_id} 对应的工作空间不存在'}, ensure_ascii=False)}\n\n"
-                return
-
-            module_workspace_path = str(module_workspace_dir.absolute())
 
             # 查找对应的 module
             module = await self.module_repo.get_module_by_session_id(session_id=session_id)
@@ -2273,6 +2271,7 @@ class ModuleService:
                 logger.info(f"Starting analyze-prd task: session_id={session_id}, module={module_name}")
 
                 # 流式处理 analyze-prd 任务
+                buffer = ""
                 async for chat_msg in self.agent_service.chat_stream(
                     prompt=prompt,
                     session_id=session_id,
@@ -2283,17 +2282,24 @@ class ModuleService:
 
                     # 根据消息类型调整进度展示
                     if chat_msg.type in ("text", "text_delta"):
-                        # 文本消息，显示为 analyze_prd 进度（35-75%）
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': chat_msg.content[:100], 'progress': 55}, ensure_ascii=False)}\n\n"
+                        # 文本消息，累加到缓冲区，按 \n\n 分隔输出
+                        buffer += chat_msg.content
+                        while "\n\n" in buffer:
+                            line, buffer = buffer.split("\n\n", 1)
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 55}, ensure_ascii=False)}\n\n"
                     elif chat_msg.type == "tool_use":
-                        # 工具调用
+                        # 工具调用，打印日志
                         tool_name = msg_dict.get('tool_name', 'unknown')
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': f'正在执行: {tool_name}', 'progress': 65}, ensure_ascii=False)}\n\n"
+                        logger.info(f"Tool use: {tool_name}")
                     elif chat_msg.type == "error":
                         yield f"data: {json.dumps({'type': 'error', 'message': f'PRD分析失败: {chat_msg.content}'}, ensure_ascii=False)}\n\n"
                         return
 
                     await asyncio.sleep(0.01)
+
+                # 最后 flush 剩余内容（即使没有 \n\n）
+                if buffer:
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': buffer, 'progress': 55}, ensure_ascii=False)}\n\n"
 
                 yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'success', 'message': 'PRD模块分析完成', 'progress': 75}, ensure_ascii=False)}\n\n"
 
@@ -2307,7 +2313,7 @@ class ModuleService:
 
             try:
                 # 根据文档，生成的文件路径为: {workspace_path}/docs/PRD-GEN/clarification.md
-                prd_gen_dir = self._find_prd_gen_dir(module_workspace_dir)
+                prd_gen_dir = self._find_prd_gen_dir(prd_workspace_dir)
                 clarification_path = prd_gen_dir / "clarification.md"
 
                 if not clarification_path.exists():
@@ -2365,6 +2371,7 @@ class ModuleService:
     async def prepare_and_generate_spec_stream(
         self,
         session_id: str,
+        content: Optional[str] = None,
         created_by: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
@@ -2381,6 +2388,7 @@ class ModuleService:
 
         Args:
             session_id: 模块的 session_id
+            content: 模块的 需求内容
             created_by: 创建者
 
         Yields:
@@ -2523,6 +2531,8 @@ class ModuleService:
                     return
 
             # 步骤7: 创建 Version 记录
+            if content:
+                module.require_content = content
             if module.require_content:
                 yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 77}, ensure_ascii=False)}\n\n"
 

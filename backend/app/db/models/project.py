@@ -23,6 +23,7 @@ class Project(Base, BaseModel):
     codebase = Column(String(512), nullable=True, comment="Git仓库地址")
     token = Column(String(512), nullable=True, comment="Git认证令牌")
     owner = Column(String(512), nullable=True, comment="持有者ID")
+    prd_session_id = Column(String(512), nullable=True, comment="prd文件的session_id")
 
     # Indexes
     __table_args__ = (

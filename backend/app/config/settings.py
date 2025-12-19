@@ -13,16 +13,45 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings
 
 
+def deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Deep merge two dictionaries. Override values take precedence.
+
+    Args:
+        base: Base configuration dictionary
+        override: Override configuration dictionary
+
+    Returns:
+        Merged configuration dictionary
+    """
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 def load_yaml_config() -> Dict[str, Any]:
     """
-    Load configuration from YAML file
-    
+    Load configuration from YAML files with local override support.
+
+    Loading order:
+    1. Load config.yaml (or config.example.yaml as fallback) as base configuration
+    2. If config.local.yaml exists, merge it with base (local values override base)
+    3. Return merged configuration
+
+    This allows each developer to have their own local configuration without
+    affecting the test/production environment's config.yaml.
+
     Returns:
         Dictionary containing all configuration values
     """
     config_dir = Path(__file__).parent
     config_path = config_dir / "config.yaml"
 
+    # Load base configuration
     if not config_path.exists():
         config_path = config_dir / "config.example.yaml"
         if not config_path.exists():
@@ -33,11 +62,26 @@ def load_yaml_config() -> Dict[str, Any]:
 
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f) or {}
+            base_config = yaml.safe_load(f) or {}
     except yaml.YAMLError as e:
         raise ValueError(f"Error parsing YAML configuration: {e}")
     except Exception as e:
         raise RuntimeError(f"Error loading configuration file: {e}")
+
+    # Load local configuration if exists
+    local_config_path = config_dir / "config.local.yaml"
+    if local_config_path.exists():
+        try:
+            with open(local_config_path, 'r', encoding='utf-8') as f:
+                local_config = yaml.safe_load(f) or {}
+            # Merge local config with base config (local overrides base)
+            return deep_merge(base_config, local_config)
+        except yaml.YAMLError as e:
+            raise ValueError(f"Error parsing local YAML configuration: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Error loading local configuration file: {e}")
+
+    return base_config
 
 
 # Load configuration
