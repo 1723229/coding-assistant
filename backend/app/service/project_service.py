@@ -184,7 +184,7 @@ class ProjectService:
                         result = await module_service.delete_module(module_id=module.id)
 
                         # 检查删除是否成功
-                        if result.get('code') == 200:
+                        if result.code == 200:
                             deleted_count += 1
                             logger.info(f"Successfully deleted module tree: {module.name}")
                         else:
