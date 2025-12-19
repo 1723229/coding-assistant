@@ -2316,6 +2316,7 @@ class ModuleService:
                 cla_workspace_dir = Path.home() / "workspace" / session_id
                 cla_gen_dir = self._find_prd_gen_dir(cla_workspace_dir)
                 clarification_path = cla_gen_dir / "clarification.md"
+                logger.info("clarification path: {}".format(clarification_path))
 
                 if not clarification_path.exists():
                     yield f"data: {json.dumps({'type': 'error', 'message': f'未找到文件: {clarification_path}'}, ensure_ascii=False)}\n\n"
