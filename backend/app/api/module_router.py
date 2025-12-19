@@ -10,9 +10,11 @@ import uuid
 import json
 import asyncio
 import logging
+from typing import Optional
 from pathlib import Path as FilePath
-from fastapi import APIRouter, Query, Path, UploadFile, File, HTTPException
+from fastapi import APIRouter, Query, Path, UploadFile, File, HTTPException, Body
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from app.service.module_service import ModuleService
 from app.db.schemas import ModuleCreate, ModuleUpdate
 from app.utils import BaseResponse
@@ -24,6 +26,16 @@ module_router = APIRouter(prefix="/modules", tags=["modules"])
 
 # 创建service实例
 module_service = ModuleService()
+
+
+# ===================
+# Request Models
+# ===================
+
+class PrepareAndGenerateSpecRequest(BaseModel):
+    """准备环境并生成Spec的请求模型"""
+    session_id: str = Field(..., description="模块的session_id")
+    content: Optional[str] = Field(None, description="需求内容")
 
 
 @module_router.get(
@@ -494,8 +506,7 @@ async def analyze_prd_module_stream(
     operation_id="prepare_and_generate_spec_stream"
 )
 async def prepare_and_generate_spec_stream(
-    session_id: str = Query(..., description="模块的session_id"),
-    content: str = Query(None, description="需求内容")
+    request: PrepareAndGenerateSpecRequest = Body(..., description="请求体")
 ):
     """
     准备环境并生成 Spec（流式）
@@ -505,18 +516,18 @@ async def prepare_and_generate_spec_stream(
     **流程**:
     1. 验证 project 配置（Git地址和Token）
     2. 检查工作空间代码
-       - 无代码：拉取代码 → 创建分支
+       - 无代码:拉取代码 → 创建分支
        - 有代码：跳过
     3. 检查容器状态
-       - 无容器：检查容器阈值 → 创建容器
-       - 有容器：跳过
+       - 无容器：检查容器阈值 → 创建容器（返回preview_url）
+       - 有容器：跳过（返回preview_url）
     4. 创建/更新 Version 记录
     5. 生成 Spec 文档
     6. 更新 Version 状态为 SPEC_GENERATED
 
     **事件类型**:
     - connected: 连接建立
-    - step: 步骤进度更新
+    - step: 步骤进度更新（容器步骤会包含preview_url）
     - error: 错误信息
     - complete: 处理完成，包含 spec_content 和 version_id
 
@@ -525,14 +536,16 @@ async def prepare_and_generate_spec_stream(
     - 重新生成 Spec（容器可能已清理）
     - 环境异常后恢复生成
 
-    示例:
-    - session_id: "module-uuid-123"
-    - content: ""
+    请求体示例:
+    {
+        "session_id": "module-uuid-123",
+        "content": "功能需求描述"
+    }
     """
     return StreamingResponse(
         module_service.prepare_and_generate_spec_stream(
-            session_id=session_id,
-            content=content
+            session_id=request.session_id,
+            content=request.content
         ),
         media_type="text/event-stream",
         headers={

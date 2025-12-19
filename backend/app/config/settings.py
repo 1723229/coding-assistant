@@ -151,7 +151,7 @@ class ServerConfig:
     RELOAD = _server_config.get("reload", True)
     DEBUG = _server_config.get("debug", False)
     CORS_ORIGINS = _server_config.get("cors_origins", ["http://localhost:5173", "http://localhost:3000"])
-    PREVIEW_IP = _server_config.get("preview_ip", "0.0.0.0")
+    PREVIEW_IP = _server_config.get("preview_ip", "http://locaalhost")
 
     @classmethod
     def get_web_interface_url(cls) -> str:

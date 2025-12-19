@@ -2487,13 +2487,19 @@ class ModuleService:
 
             executor = get_sandbox_executor()
             container_exists = False
+            preview_url = None
 
             try:
                 # 尝试获取容器信息
                 container_info = await executor.get_container_status(session_id)
                 if container_info and container_info.get('status') == 'running':
                     container_exists = True
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'check_container', 'status': 'success', 'message': '容器已存在且运行中', 'progress': 65}, ensure_ascii=False)}\n\n"
+                    # 获取 preview_url
+                    code_port = container_info.get('code_port')
+                    if code_port:
+                        preview_url = f"{settings.preview_ip}:{code_port}/{module.url}"
+
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'check_container', 'status': 'success', 'message': '容器已存在且运行中', 'preview_url': preview_url, 'progress': 65}, ensure_ascii=False)}\n\n"
             except Exception as e:
                 logger.info(f"Container not found or not running: {e}")
                 yield f"data: {json.dumps({'type': 'step', 'step': 'check_container', 'status': 'success', 'message': '容器不存在，需要创建', 'progress': 65}, ensure_ascii=False)}\n\n"
@@ -2523,8 +2529,13 @@ class ModuleService:
                     module_update = ModuleUpdate(container_id=container_info["id"])
                     await self.module_repo.update_module(module_id=module.id, data=module_update)
 
+                    # 获取 preview_url
+                    code_port = container_info.get('code_port')
+                    if code_port:
+                        preview_url = f"{settings.preview_ip}:{code_port}/{module.url}"
+
                     container_id_short = container_info["id"][:12]
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'success', 'message': f'容器ID: {container_id_short}', 'progress': 75}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'success', 'message': f'容器ID: {container_id_short}', 'preview_url': preview_url, 'progress': 75}, ensure_ascii=False)}\n\n"
 
                 except Exception as e:
                     logger.error(f"Container creation failed: {e}")
