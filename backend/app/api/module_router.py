@@ -428,7 +428,7 @@ async def create_modules_from_metadata(
     data =  await module_service.create_modules_from_metadata(session_id=session_id)
     return BaseResponse.success(
         data=data,
-        message=f"成功创建项目和 {data.get("module_count")} 个模块"
+        message=f"成功创建项目和 {data.get('module_count')} 个模块"
     )
 
 
