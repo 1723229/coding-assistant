@@ -2526,14 +2526,15 @@ class ModuleService:
                         workspace_path=workspace_path
                     )
 
-                    # 更新模块的 container_id
-                    module_update = ModuleUpdate(container_id=container_info["id"])
-                    await self.module_repo.update_module(module_id=module.id, data=module_update)
 
                     # 获取 preview_url
                     code_port = container_info.get('code_port')
                     if code_port:
                         preview_url = f"{settings.preview_ip}:{code_port}/{module.url}"
+
+                    # 更新模块的 container_id和preview_url
+                    module_update = ModuleUpdate(container_id=container_info["id"], preview_url=preview_url)
+                    await self.module_repo.update_module(module_id=module.id, data=module_update)
 
                     container_id_short = container_info["id"][:12]
                     yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'success', 'message': f'容器ID: {container_id_short}', 'preview_url': preview_url, 'progress': 75}, ensure_ascii=False)}\n\n"
