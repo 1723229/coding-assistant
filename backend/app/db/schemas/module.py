@@ -7,7 +7,7 @@ Pydantic models for Module validation and serialization
 from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
-from app.db.models.module import ModuleType
+from app.db.models.module import ModuleType, ContentStatus
 
 
 class ModuleBase(BaseModel):
@@ -18,7 +18,7 @@ class ModuleBase(BaseModel):
     name: str = Field(..., max_length=255, description="模块名称")
     code: str = Field(..., max_length=64, description="模块代码，在Project内唯一")
     url: Optional[str] = Field(None, max_length=512, description="可访问的链接（NODE类型与子节点共享）")
-    require_content: Optional[str] = Field(None, max_length=2000, description="功能需求描述")
+    require_content: Optional[str] = Field(None, description="功能需求描述")
     # preview_url: Optional[str] = Field(None, max_length=512, description="预览页面，前端不操作")
 
     # POINT 类型的字段（创建时可选）
@@ -38,8 +38,9 @@ class ModuleUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255, description="模块名称")
     code: Optional[str] = Field(None, max_length=64, description="模块代码")
     url: Optional[str] = Field(None, max_length=512, description="菜单")
-    require_content: Optional[str] = Field(None, max_length=2000, description="功能需求描述")
-    # preview_url: Optional[str] = Field(None, max_length=512, description="预览页面，前端不操作")
+    require_content: Optional[str] = Field(None, description="功能需求描述")
+    content_status: Optional[ContentStatus] = Field(None, max_length=64, description="状态")
+    preview_url: Optional[str] = Field(None, max_length=512, description="预览页面，前端不操作")
     branch: Optional[str] = Field(None, max_length=128, description="Git分支（仅POINT类型）")
     container_id: Optional[str] = Field(None, max_length=512, description="容器id")
     latest_commit_id: Optional[str] = Field(None, max_length=64, description="最新commit ID（仅POINT类型）")
@@ -52,6 +53,7 @@ class ModuleUpdate(BaseModel):
 class ModuleResponse(ModuleBase):
     """Schema for module response"""
     id: int
+    content_status: Optional[ContentStatus] = None
     preview_url: Optional[str] = None
     session_id: Optional[str] = None
     workspace_path: Optional[str] = None
@@ -72,6 +74,15 @@ class ModuleResponse(ModuleBase):
 class ModuleTreeResponse(ModuleResponse):
     """Schema for module tree response with children"""
     children: list["ModuleTreeResponse"] = []
+
+    class Config:
+        from_attributes = True
+
+
+class ModuleContentStatusResponse(BaseModel):
+    """Schema for module id and content_status response"""
+    id: int = Field(..., description="模块ID")
+    content_status: Optional[ContentStatus] = Field(None, description="内容状态")
 
     class Config:
         from_attributes = True

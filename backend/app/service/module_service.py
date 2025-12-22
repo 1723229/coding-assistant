@@ -17,19 +17,20 @@ from fastapi import Query, UploadFile
 from app.api.chat_router import module_repo
 from app.config.logging_config import log_print
 from app.config import get_settings
+from app.config.settings import FrameworkDatabaseConfig
 from app.utils.model.response_model import BaseResponse, ListResponse
 from app.db.repository import ModuleRepository, ProjectRepository, VersionRepository, SessionRepository, \
     MessageRepository
 from app.db.schemas import ModuleCreate, ModuleUpdate, ModuleResponse, VersionCreate, VersionUpdate
-from app.db.models.module import ModuleType
+from app.db.models.module import ModuleType, ContentStatus
 from app.db.models.version import VersionStatus
 from app.core.executor import get_sandbox_executor
 from app.core.github_service import GitHubService
-from app.core.sandbox_service import SandboxService, session_manager
 from app.utils.mysql_util import MySQLUtil
 from datetime import datetime
 from app.utils.prompt.prompt_build import generate_code_from_spec
 from app.config.settings import ContainerConfig
+from app.core.agent_service import AgentService
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -51,13 +52,34 @@ class ModuleService:
         self.project_repo = ProjectRepository()
         self.version_repo = VersionRepository()
         self.session_repo = SessionRepository()
+        self.agent_service = AgentService()
         self.db = MySQLUtil(
-      host="172.27.1.37",
-      port=3306,
-      user="root",
-      password="123456",
-      database="framework"
-  )
+            host=FrameworkDatabaseConfig.HOST,
+            port=FrameworkDatabaseConfig.PORT,
+            user=FrameworkDatabaseConfig.USER,
+            password=FrameworkDatabaseConfig.PASSWORD,
+            database=FrameworkDatabaseConfig.DATABASE
+        )
+
+    def _find_prd_gen_dir(self, workspace_dir: Path) -> Path:
+        """
+        查找不区分大小写的 PRD-GEN 目录
+
+        Args:
+            workspace_dir: workspace 根目录
+
+        Returns:
+            PRD-GEN 目录的 Path 对象（如果不存在则返回默认路径）
+        """
+        docs_dir = workspace_dir / "docs"
+
+        if docs_dir.exists() and docs_dir.is_dir():
+            for item in docs_dir.iterdir():
+                if item.is_dir() and item.name.upper() == "PRD-GEN":
+                    return item
+
+        # 回退到默认路径
+        return workspace_dir / "docs" / "PRD-GEN"
 
     async def _check_container_limit(self) -> tuple[bool, str]:
         """
@@ -592,7 +614,7 @@ class ModuleService:
                 yield f"data: {json.dumps({'type': 'step', 'step': 'create_module', 'status': 'success', 'message': f'模块ID: {module_id}, URL_ID: {insert_id}', 'module_id': module_id, 'progress': 40})}\n\n"
 
                 # 步骤5: 检查并拉取代码
-                if project.codebase:
+                if project.codebase and project.codebase != '':
                     if not project.token:
                         yield f"data: {json.dumps({'type': 'error', 'message': '项目配置了Git地址但缺少Token'})}\n\n"
                         return
@@ -605,13 +627,24 @@ class ModuleService:
 
                         try:
                             service = GitHubService(token=project.token)
-                            await service.clone_repo(
+                            repo = await service.clone_repo(
                                 repo_url=project.codebase,
                                 target_path=workspace_path,
                                 branch=module_data.get("branch"),
                             )
+                            if repo:
+                                yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'success', 'message': '代码仓库克隆成功', 'progress': 50})}\n\n"
+                            else:
+                                yield f"data: {json.dumps({'type': 'error', 'message': f'代码拉取失败'})}\n\n"
+                                return
 
-                            yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'success', 'message': '代码仓库克隆成功', 'progress': 50})}\n\n"
+                            await self.session_repo.create_session(
+                                session_id=session_id,
+                                name=project.code + '-' + data.code,
+                                workspace_path=workspace_path,
+                                github_repo_url=project.codebase,
+                                github_branch=data.branch or "main",
+                            )
 
                             # 创建分支
                             yield f"data: {json.dumps({'type': 'step', 'step': 'create_branch', 'status': 'progress', 'message': '创建功能分支...', 'progress': 55})}\n\n"
@@ -628,7 +661,8 @@ class ModuleService:
                     else:
                         yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'success', 'message': '工作空间已有代码，跳过克隆', 'progress': 60})}\n\n"
                 else:
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'clone_repo', 'status': 'skipped', 'message': '项目未配置Git地址，跳过代码拉取', 'progress': 60})}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'message': '项目未配置Git地址，请配置好仓库信息和token', 'progress': 60})}\n\n"
+                    return
 
                 # 步骤6: 检查容器阈值
                 yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'progress', 'message': '检查容器限制...', 'progress': 62})}\n\n"
@@ -675,7 +709,6 @@ class ModuleService:
                     code=version_code,
                     module_id=module_id,
                     msg="[SpecCoding Auto Commit] - Initial spec generation",
-                    commit="pending",  # 暂时设置为 pending，后续更新
                     status=VersionStatus.SPEC_GENERATING.value
                 )
 
@@ -686,6 +719,8 @@ class ModuleService:
 
                 # 步骤9: 生成spec文档
                 if data.require_content:
+                    module_update = ModuleUpdate(require_content=data.require_content, content_status=ContentStatus.COMPLETED)
+                    module_repo.update_module(module_id=module.session_id, module_update=module_update)
                     try:
                         await message_repo.create_message(
                             session_id=session_id,
@@ -731,8 +766,6 @@ class ModuleService:
                         spec_content, msg_list, result = await task
                         if spec_content:
                             yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'spec_content': spec_content, 'progress': 85})}\n\n"
-                            module_update = ModuleUpdate(spec_content=spec_content)
-                            module_repo.update_module(module_id=module.session_id, module_update=module_update)
 
                             # 更新 Version 状态为 SPEC_GENERATED
                             await self._update_version_status(
@@ -894,40 +927,96 @@ class ModuleService:
 
     @log_print
     async def delete_module(self, module_id: int):
-        """删除模块（级联删除子模块，清理 POINT 类型的 workspace 和容器）"""
+        """
+        删除模块（递归删除子模块，清理所有相关资源）
+
+        清理内容：
+        1. 递归删除所有子模块
+        2. 删除 framework 数据库中的 sys_module 记录
+        3. 对于 POINT 类型模块：
+           - 停止并删除容器
+           - 删除工作空间目录
+           - 将所有版本记录状态改为 DELETED
+        4. 删除模块数据库记录
+        """
         try:
             module = await self.module_repo.get_module_by_id(module_id=module_id)
             if not module:
                 return BaseResponse.not_found(message=f"模块 ID {module_id} 不存在")
 
-            # Clean up POINT type resources
-            if module.type == ModuleType.POINT:
-                # Clean up container if exists
-                if module.session_id:
+            # 递归删除函数
+            async def delete_module_recursive(mod: any) -> None:
+                """递归删除模块及其所有子模块"""
+                # 1. 先递归删除所有子模块
+                children = await self.module_repo.get_children_modules(parent_id=mod.id)
+                for child in children:
+                    await delete_module_recursive(child)
+
+                logger.info(f"Deleting module: {mod.name} (ID: {mod.id}, Type: {mod.type})")
+
+                # 2. 删除 framework 数据库中的 sys_module 记录
+                if mod.url_id:
                     try:
-                        # executor = get_sandbox_executor()
-                        # await executor.stop_container(module.session_id)
-                        logger.info(f"Stopped container for session: {module.session_id}")
+                        self.db.execute_update("DELETE FROM sys_module WHERE id=%s", (mod.url_id,))
+                        logger.info(f"Deleted sys_module record: url_id={mod.url_id}")
                     except Exception as e:
-                        logger.warning(f"Failed to stop container: {e}")
+                        logger.warning(f"Failed to delete sys_module record: {e}")
 
-                # Clean up workspace directory
-                if module.workspace_path:
+                # 3. 处理 POINT 类型模块的特殊资源
+                if mod.type == ModuleType.POINT:
+                    # 3.1 停止并删除容器
+                    if mod.session_id:
+                        try:
+                            executor = get_sandbox_executor()
+                            await executor.stop_container(mod.session_id)
+                            logger.info(f"Stopped and deleted container for session: {mod.session_id}")
+                        except Exception as e:
+                            logger.warning(f"Failed to stop container: {e}")
+
+                    # 3.2 删除工作空间目录
+                    if mod.workspace_path:
+                        try:
+                            import shutil
+                            workspace = Path(mod.workspace_path)
+                            if workspace.exists():
+                                shutil.rmtree(workspace)
+                                logger.info(f"Removed workspace: {mod.workspace_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to remove workspace: {e}")
+
+                    # 3.3 将所有版本记录状态改为 DELETED
                     try:
-                        import shutil
-                        workspace = Path(module.workspace_path)
-                        if workspace.exists():
-                            shutil.rmtree(workspace)
-                            logger.info(f"Removed workspace: {module.workspace_path}")
+                        from app.db.models.version import VersionStatus
+                        versions = await self.version_repo.get_versions_by_module(
+                            module_id=mod.id,
+                            skip=0,
+                            limit=1000  # 获取所有版本
+                        )
+
+                        for version in versions:
+                            if version.status != VersionStatus.DELETED.value:
+                                from app.db.schemas import VersionUpdate
+                                version_update = VersionUpdate(
+                                    status=VersionStatus.DELETED.value
+                                )
+                                await self.version_repo.update_version(
+                                    version_id=version.id,
+                                    data=version_update
+                                )
+
+                        if versions:
+                            logger.info(f"Updated {len(versions)} version records to DELETED status for module {mod.id}")
                     except Exception as e:
-                        logger.warning(f"Failed to remove workspace: {e}")
+                        logger.warning(f"Failed to update version status: {e}")
 
-            # Delete module from database (cascades to children)
-            await self.module_repo.delete_module(module_id=module_id)
-            self.db.execute_update("DELETE FROM sys_module WHERE id=%s", module.url_id)
-            self.db.execute_update("DELETE FROM sys_module WHERE parent_id=%s", module.url_id)
+                # 4. 删除模块数据库记录
+                await self.module_repo.delete_module(module_id=mod.id)
+                logger.info(f"Deleted module from database: {mod.name} (ID: {mod.id})")
 
-            return BaseResponse.success(message="模块删除成功")
+            # 开始递归删除
+            await delete_module_recursive(module)
+
+            return BaseResponse.success(message=f"模块 '{module.name}' 及其子模块已成功删除")
         except Exception as e:
             logger.error(f"删除模块失败: {e}", exc_info=True)
             return BaseResponse.error(message=f"删除模块失败: {str(e)}")
@@ -1520,18 +1609,14 @@ class ModuleService:
 
             try:
                 # 获取沙箱服务
-                sandbox_service = await session_manager.get_service(
-                    session_id=session_id,
-                    workspace_path=workspace_path,
-                )
-
                 # 调用 chat_stream，传入 prd.md 的绝对路径和 task_type
                 prompt = str(prd_file_path.absolute())
 
                 logger.info(f"Starting prd-decompose task: session_id={session_id}, prompt={prompt}")
 
                 # 流式处理 prd-decompose 任务
-                async for chat_msg in sandbox_service.chat_stream(
+                buffer = ""
+                async for chat_msg in self.agent_service.chat_stream(
                     prompt=prompt,
                     session_id=session_id,
                     task_type="prd-decompose",
@@ -1541,17 +1626,24 @@ class ModuleService:
 
                     # 根据消息类型调整进度展示
                     if chat_msg.type in ("text", "text_delta"):
-                        # 文本消息，显示为 prd_decompose 进度（35-80%）
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'progress', 'message': chat_msg.content[:100], 'progress': 50}, ensure_ascii=False)}\n\n"
+                        # 文本消息，累加到缓冲区，按 \n\n 分隔输出
+                        buffer += chat_msg.content
+                        while "\n\n" in buffer:
+                            line, buffer = buffer.split("\n\n", 1)
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 50}, ensure_ascii=False)}\n\n"
                     elif chat_msg.type == "tool_use":
-                        # 工具调用
+                        # 工具调用，打印日志
                         tool_name = msg_dict.get('tool_name', 'unknown')
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'progress', 'message': f'正在执行: {tool_name}', 'progress': 60}, ensure_ascii=False)}\n\n"
+                        logger.info(f"Tool use: {tool_name}")
                     elif chat_msg.type == "error":
                         yield f"data: {json.dumps({'type': 'error', 'message': f'PRD分解失败: {chat_msg.content}'}, ensure_ascii=False)}\n\n"
                         return
 
                     await asyncio.sleep(0.01)
+
+                # 最后 flush 剩余内容（即使没有 \n\n）
+                if buffer:
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': buffer, 'progress': 50}, ensure_ascii=False)}\n\n"
 
                 yield f"data: {json.dumps({'type': 'step', 'step': 'prd_decompose', 'status': 'success', 'message': 'PRD分解任务完成', 'progress': 80}, ensure_ascii=False)}\n\n"
 
@@ -1565,7 +1657,8 @@ class ModuleService:
 
             try:
                 # 根据文档，生成的文件路径为: {workspace_path}/docs/PRD-GEN/
-                prd_gen_dir = workspace_dir / "docs" / "PRD-GEN"
+                # 支持不区分大小写查找 PRD-GEN 目录
+                prd_gen_dir = self._find_prd_gen_dir(workspace_dir)
                 feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
                 metadata_path = prd_gen_dir / "METADATA.json"
 
@@ -1596,7 +1689,8 @@ class ModuleService:
                 yield f"data: {json.dumps({'type': 'error', 'message': f'读取生成文件失败: {str(e)}'}, ensure_ascii=False)}\n\n"
                 return
 
-            # 步骤6: 返回结果
+            # 步骤6: 创建项目和节点
+            data = await self.create_modules_from_metadata(session_id=session_id)
             result_data = {
                 'type': 'complete',
                 'message': 'PRD处理完成',
@@ -1607,6 +1701,7 @@ class ModuleService:
                     'prd_path': str(prd_file_path.absolute()),
                     'feature_tree_path': str(feature_tree_path.absolute()),
                     'metadata_path': str(metadata_path.absolute()),
+                    'project_id': data['project_id']
                 }
             }
 
@@ -1669,7 +1764,7 @@ class ModuleService:
 
             # 检查必要文件是否存在
             prd_file_path = workspace_dir / "prd.md"
-            prd_gen_dir = workspace_dir / "docs" / "PRD-GEN"
+            prd_gen_dir = self._find_prd_gen_dir(workspace_dir)
             feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
             metadata_path = prd_gen_dir / "METADATA.json"
 
@@ -1682,7 +1777,8 @@ class ModuleService:
                 missing_files.append("METADATA.json")
 
             if missing_files:
-                yield f"data: {json.dumps({'type': 'error', 'message': f'缺少必要文件: {', '.join(missing_files)}'}, ensure_ascii=False)}\n\n"
+                message = f"缺少必要文件: {', '.join(missing_files)}"
+                yield f"data: {json.dumps({'type': 'error', 'message': message}, ensure_ascii=False)}\n\n"
                 return
 
             workspace_path = str(workspace_dir.absolute())
@@ -1701,16 +1797,11 @@ class ModuleService:
             yield f"data: {json.dumps({'type': 'step', 'step': 'prd_change', 'status': 'progress', 'message': '开始PRD修改任务...', 'progress': 25}, ensure_ascii=False)}\n\n"
 
             try:
-                # 获取沙箱服务
-                sandbox_service = await session_manager.get_service(
-                    session_id=session_id,
-                    workspace_path=workspace_path,
-                )
 
                 logger.info(f"Starting prd-change task: session_id={session_id}, prompt={prompt}")
 
                 # 流式处理 prd-change 任务
-                async for chat_msg in sandbox_service.chat_stream(
+                async for chat_msg in self.agent_service.chat_stream(
                     prompt=prompt,
                     session_id=session_id,
                     task_type="prd-change",
@@ -1819,7 +1910,7 @@ class ModuleService:
 
             # 检查必要文件是否存在
             prd_file_path = workspace_dir / "prd.md"
-            prd_gen_dir = workspace_dir / "docs" / "PRD-GEN"
+            prd_gen_dir = self._find_prd_gen_dir(workspace_dir)
             feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
             metadata_path = prd_gen_dir / "METADATA.json"
 
@@ -1832,7 +1923,8 @@ class ModuleService:
                 missing_files.append("METADATA.json")
 
             if missing_files:
-                yield f"data: {json.dumps({'type': 'error', 'message': f'缺少必要文件: {', '.join(missing_files)}'}, ensure_ascii=False)}\n\n"
+                message = f"缺少必要文件: {', '.join(missing_files)}"
+                yield f"data: {json.dumps({'type': 'error', 'message': message}, ensure_ascii=False)}\n\n"
                 return
 
             workspace_path = str(workspace_dir.absolute())
@@ -1843,18 +1935,13 @@ class ModuleService:
 
             try:
                 # 获取沙箱服务
-                sandbox_service = await session_manager.get_service(
-                    session_id=session_id,
-                    workspace_path=workspace_path,
-                )
-
                 # confirm-prd 任务的 prompt 为空字符串
                 prompt = ""
 
                 logger.info(f"Starting confirm-prd task: session_id={session_id}")
 
                 # 流式处理 confirm-prd 任务
-                async for chat_msg in sandbox_service.chat_stream(
+                async for chat_msg in self.agent_service.chat_stream(
                     prompt=prompt,
                     session_id=session_id,
                     task_type="confirm-prd",
@@ -1944,7 +2031,8 @@ class ModuleService:
         try:
             # 步骤1: 读取 METADATA.json
             workspace_dir = Path.home() / "workspace" / session_id
-            metadata_path = workspace_dir / "docs" / "PRD-GEN" / "METADATA.json"
+            prd_gen_dir = self._find_prd_gen_dir(workspace_dir)
+            metadata_path = prd_gen_dir / "METADATA.json"
 
             if not metadata_path.exists():
                 return BaseResponse.error(message=f"未找到文件: {metadata_path}")
@@ -1960,7 +2048,7 @@ class ModuleService:
 
             # 步骤2: 创建 project
             project_name = system_info.get('name_zh', 'Unnamed Project')
-            project_code = system_info.get('name_en', 'Unnamed Project')
+            project_code = system_info.get('name_en', 'Unnamed Project') + '-' + session_id
 
             # 检查项目是否已存在
             existing_project = await self.project_repo.get_project_by_code(code=project_code)
@@ -1972,7 +2060,8 @@ class ModuleService:
                 from app.db.schemas import ProjectCreate
                 project_data = ProjectCreate(
                     code=project_code,
-                    name=project_name
+                    name=project_name,
+                    prd_session_id=session_id,
                 )
 
                 project = await self.project_repo.create_project(data=project_data)
@@ -2019,6 +2108,7 @@ class ModuleService:
                         'workspace_path': workspace_path,
                         'branch': 'main',
                         'is_active': 1,
+                        'content_status': ContentStatus.PENDING
                     })
 
                     logger.info(f"POINT module: {module_code}, session_id: {session_id}, workspace: {workspace_path}")
@@ -2088,14 +2178,11 @@ class ModuleService:
             for feature in features:
                 await create_module_tree(feature, parent_id=None, url_parent_id=None, level=0)
 
-            return BaseResponse.success(
-                data={
+            return {
                     'project_id': project_id,
                     'project_name': project_name,
                     'module_count': module_count
-                },
-                message=f"成功创建项目和 {module_count} 个模块"
-            )
+                }
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse METADATA.json: {e}", exc_info=True)
@@ -2140,15 +2227,6 @@ class ModuleService:
             # 步骤1: 验证模块的 session_id 和 workspace
             yield f"data: {json.dumps({'type': 'step', 'step': 'validate_module', 'status': 'progress', 'message': '验证模块信息...', 'progress': 5}, ensure_ascii=False)}\n\n"
 
-            # 构建模块的 workspace 路径
-            module_workspace_dir = Path.home() / "workspace" / session_id
-
-            if not module_workspace_dir.exists():
-                yield f"data: {json.dumps({'type': 'error', 'message': f'模块 session {session_id} 对应的工作空间不存在'}, ensure_ascii=False)}\n\n"
-                return
-
-            module_workspace_path = str(module_workspace_dir.absolute())
-
             # 查找对应的 module
             module = await self.module_repo.get_module_by_session_id(session_id=session_id)
             if not module:
@@ -2161,7 +2239,7 @@ class ModuleService:
             yield f"data: {json.dumps({'type': 'step', 'step': 'validate_prd', 'status': 'progress', 'message': '验证PRD文件...', 'progress': 15}, ensure_ascii=False)}\n\n"
 
             prd_workspace_dir = Path.home() / "workspace" / prd_session_id
-            prd_gen_dir = prd_workspace_dir / "docs" / "PRD-GEN"
+            prd_gen_dir = self._find_prd_gen_dir(prd_workspace_dir)
             feature_tree_path = prd_gen_dir / "FEATURE_TREE.md"
             prd_file_path = prd_workspace_dir / "prd.md"
 
@@ -2172,7 +2250,8 @@ class ModuleService:
                 missing_files.append("prd.md")
 
             if missing_files:
-                yield f"data: {json.dumps({'type': 'error', 'message': f'PRD session {prd_session_id} 缺少文件: {', '.join(missing_files)}'}, ensure_ascii=False)}\n\n"
+                message = f"缺少必要文件: {', '.join(missing_files)}"
+                yield f"data: {json.dumps({'type': 'error', 'message': message}, ensure_ascii=False)}\n\n"
                 return
 
             yield f"data: {json.dumps({'type': 'step', 'step': 'validate_prd', 'status': 'success', 'message': 'PRD文件验证成功', 'progress': 20}, ensure_ascii=False)}\n\n"
@@ -2188,18 +2267,24 @@ class ModuleService:
 
             # 步骤4: 调用 chat_stream 进行 analyze-prd 任务
             yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': '开始PRD模块分析...', 'progress': 35}, ensure_ascii=False)}\n\n"
-
             try:
-                # 获取沙箱服务（使用模块自己的 session_id）
-                sandbox_service = await session_manager.get_service(
-                    session_id=session_id,
-                    workspace_path=module_workspace_path,
+                module_update = ModuleUpdate(content_status=ContentStatus.IN_PROGRESS)
+                await self.module_repo.update_module(
+                    module_id=module.id,
+                    data=module_update
                 )
 
+            except Exception as e:
+                logger.error(f"Failed to update module: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'更新module失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            try:
                 logger.info(f"Starting analyze-prd task: session_id={session_id}, module={module_name}")
 
                 # 流式处理 analyze-prd 任务
-                async for chat_msg in sandbox_service.chat_stream(
+                buffer = ""
+                async for chat_msg in self.agent_service.chat_stream(
                     prompt=prompt,
                     session_id=session_id,
                     task_type="analyze-prd",
@@ -2209,17 +2294,24 @@ class ModuleService:
 
                     # 根据消息类型调整进度展示
                     if chat_msg.type in ("text", "text_delta"):
-                        # 文本消息，显示为 analyze_prd 进度（35-75%）
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': chat_msg.content[:100], 'progress': 55}, ensure_ascii=False)}\n\n"
+                        # 文本消息，累加到缓冲区，按 \n\n 分隔输出
+                        buffer += chat_msg.content
+                        while "\n\n" in buffer:
+                            line, buffer = buffer.split("\n\n", 1)
+                            yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 55}, ensure_ascii=False)}\n\n"
                     elif chat_msg.type == "tool_use":
-                        # 工具调用
+                        # 工具调用，打印日志
                         tool_name = msg_dict.get('tool_name', 'unknown')
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': f'正在执行: {tool_name}', 'progress': 65}, ensure_ascii=False)}\n\n"
+                        logger.info(f"Tool use: {tool_name}")
                     elif chat_msg.type == "error":
                         yield f"data: {json.dumps({'type': 'error', 'message': f'PRD分析失败: {chat_msg.content}'}, ensure_ascii=False)}\n\n"
                         return
 
                     await asyncio.sleep(0.01)
+
+                # 最后 flush 剩余内容（即使没有 \n\n）
+                if buffer:
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': buffer, 'progress': 55}, ensure_ascii=False)}\n\n"
 
                 yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'success', 'message': 'PRD模块分析完成', 'progress': 75}, ensure_ascii=False)}\n\n"
 
@@ -2233,7 +2325,10 @@ class ModuleService:
 
             try:
                 # 根据文档，生成的文件路径为: {workspace_path}/docs/PRD-GEN/clarification.md
-                clarification_path = module_workspace_dir / "docs" / "PRD-GEN" / "clarification.md"
+                cla_workspace_dir = Path.home() / "workspace" / session_id
+                cla_gen_dir = self._find_prd_gen_dir(cla_workspace_dir)
+                clarification_path = cla_gen_dir / "clarification.md"
+                logger.info("clarification path: {}".format(clarification_path))
 
                 if not clarification_path.exists():
                     yield f"data: {json.dumps({'type': 'error', 'message': f'未找到文件: {clarification_path}'}, ensure_ascii=False)}\n\n"
@@ -2253,8 +2348,7 @@ class ModuleService:
             yield f"data: {json.dumps({'type': 'step', 'step': 'save_content', 'status': 'progress', 'message': '保存到模块...', 'progress': 90}, ensure_ascii=False)}\n\n"
 
             try:
-                from app.db.schemas import ModuleUpdate
-                module_update = ModuleUpdate(require_content=clarification_content)
+                module_update = ModuleUpdate(require_content=clarification_content, content_status=ContentStatus.COMPLETED)
                 await self.module_repo.update_module(
                     module_id=module.id,
                     data=module_update
@@ -2290,6 +2384,7 @@ class ModuleService:
     async def prepare_and_generate_spec_stream(
         self,
         session_id: str,
+        content: Optional[str] = None,
         created_by: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
@@ -2306,6 +2401,7 @@ class ModuleService:
 
         Args:
             session_id: 模块的 session_id
+            content: 模块的 需求内容
             created_by: 创建者
 
         Yields:
@@ -2384,6 +2480,13 @@ class ModuleService:
 
                     branch_name = f"{module.branch or 'main'}-{session_id}"
                     await service.create_branch(repo_path=workspace_path, branch_name=branch_name)
+                    await self.session_repo.create_session(
+                        session_id=session_id,
+                        name=project.code + '-' + module.code,
+                        workspace_path=workspace_path,
+                        github_repo_url=project.codebase,
+                        github_branch=module.branch or "main",
+                    )
 
                     yield f"data: {json.dumps({'type': 'step', 'step': 'create_branch', 'status': 'success', 'message': '功能分支创建成功', 'progress': 55}, ensure_ascii=False)}\n\n"
 
@@ -2396,13 +2499,19 @@ class ModuleService:
 
             executor = get_sandbox_executor()
             container_exists = False
+            preview_url = None
 
             try:
                 # 尝试获取容器信息
-                container_info = await executor.get_container_info(session_id)
+                container_info = await executor.get_container_status(session_id)
                 if container_info and container_info.get('status') == 'running':
                     container_exists = True
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'check_container', 'status': 'success', 'message': '容器已存在且运行中', 'progress': 65}, ensure_ascii=False)}\n\n"
+                    # 获取 preview_url
+                    code_port = container_info.get('code_port')
+                    if code_port:
+                        preview_url = f"{settings.preview_ip}:{code_port}{module.url}"
+
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'check_container', 'status': 'success', 'message': '容器已存在且运行中', 'preview_url': preview_url, 'progress': 65}, ensure_ascii=False)}\n\n"
             except Exception as e:
                 logger.info(f"Container not found or not running: {e}")
                 yield f"data: {json.dumps({'type': 'step', 'step': 'check_container', 'status': 'success', 'message': '容器不存在，需要创建', 'progress': 65}, ensure_ascii=False)}\n\n"
@@ -2428,12 +2537,18 @@ class ModuleService:
                         workspace_path=workspace_path
                     )
 
-                    # 更新模块的 container_id
-                    module_update = ModuleUpdate(container_id=container_info["id"])
+
+                    # 获取 preview_url
+                    code_port = container_info.get('code_port')
+                    if code_port:
+                        preview_url = f"{settings.preview_ip}:{code_port}{module.url}"
+
+                    # 更新模块的 container_id和preview_url
+                    module_update = ModuleUpdate(container_id=container_info["id"], preview_url=preview_url)
                     await self.module_repo.update_module(module_id=module.id, data=module_update)
 
                     container_id_short = container_info["id"][:12]
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'success', 'message': f'容器ID: {container_id_short}', 'progress': 75}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'step', 'step': 'create_container', 'status': 'success', 'message': f'容器ID: {container_id_short}', 'preview_url': preview_url, 'progress': 75}, ensure_ascii=False)}\n\n"
 
                 except Exception as e:
                     logger.error(f"Container creation failed: {e}")
@@ -2441,6 +2556,8 @@ class ModuleService:
                     return
 
             # 步骤7: 创建 Version 记录
+            if content:
+                module.require_content = content
             if module.require_content:
                 yield f"data: {json.dumps({'type': 'step', 'step': 'create_version', 'status': 'progress', 'message': '创建版本记录...', 'progress': 77}, ensure_ascii=False)}\n\n"
 
@@ -2472,7 +2589,6 @@ class ModuleService:
                         code=version_code,
                         module_id=module.id,
                         msg="[SpecCoding Auto Commit] - Spec generation",
-                        commit="pending",
                         status=VersionStatus.SPEC_GENERATING.value
                     )
 

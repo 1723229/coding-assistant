@@ -95,3 +95,19 @@ async def delete_project(
     只删除数据库记录
     """
     return await project_service.delete_project(project_id)
+
+
+@project_router.get(
+    "/{project_id}/leaf-modules/content-status",
+    summary="获取项目叶子模块状态",
+    operation_id="get_leaf_modules_content_status"
+)
+async def get_leaf_modules_content_status(
+    project_id: int = Path(..., description="Project ID")
+):
+    """
+    获取项目下所有叶子模块(POINT类型)的ID和content_status列表
+
+    返回格式：{"code": 200, "data": [{"id": 1, "content_status": "PENDING"}, ...], "total": 10}
+    """
+    return await project_service.get_leaf_modules_content_status(project_id)
