@@ -131,6 +131,22 @@ class ModuleRepository(BaseRepository[Module, ModuleCreate, ModuleUpdate]):
         """Count modules for a project"""
         return await self.count(session, filters={"project_id": project_id})
 
+    @async_with_session
+    async def get_leaf_modules(
+        self,
+        session: AsyncSession,
+        project_id: int
+    ) -> List[Module]:
+        """Get all leaf modules (POINT type) for a project"""
+        from app.db.models.module import ModuleType
+        stmt = select(Module).where(
+            Module.project_id == project_id,
+            Module.type == ModuleType.POINT,
+            Module.is_active == 1
+        ).order_by(Module.id)
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
     async def build_module_tree(self, project_id: int) -> List[Dict]:
         """Build hierarchical tree structure for all modules in a project"""
         # Get all modules for the project

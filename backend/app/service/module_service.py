@@ -22,7 +22,7 @@ from app.utils.model.response_model import BaseResponse, ListResponse
 from app.db.repository import ModuleRepository, ProjectRepository, VersionRepository, SessionRepository, \
     MessageRepository
 from app.db.schemas import ModuleCreate, ModuleUpdate, ModuleResponse, VersionCreate, VersionUpdate
-from app.db.models.module import ModuleType
+from app.db.models.module import ModuleType, ContentStatus
 from app.db.models.version import VersionStatus
 from app.core.executor import get_sandbox_executor
 from app.core.github_service import GitHubService
@@ -719,6 +719,8 @@ class ModuleService:
 
                 # 步骤9: 生成spec文档
                 if data.require_content:
+                    module_update = ModuleUpdate(require_content=data.require_content, content_status=ContentStatus.COMPLETED)
+                    module_repo.update_module(module_id=module.session_id, module_update=module_update)
                     try:
                         await message_repo.create_message(
                             session_id=session_id,
@@ -764,8 +766,6 @@ class ModuleService:
                         spec_content, msg_list, result = await task
                         if spec_content:
                             yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'spec_content': spec_content, 'progress': 85})}\n\n"
-                            module_update = ModuleUpdate(spec_content=spec_content)
-                            module_repo.update_module(module_id=module.session_id, module_update=module_update)
 
                             # 更新 Version 状态为 SPEC_GENERATED
                             await self._update_version_status(
@@ -2048,7 +2048,7 @@ class ModuleService:
 
             # 步骤2: 创建 project
             project_name = system_info.get('name_zh', 'Unnamed Project')
-            project_code = system_info.get('name_en', 'Unnamed Project')
+            project_code = system_info.get('name_en', 'Unnamed Project') + '-' + session_id
 
             # 检查项目是否已存在
             existing_project = await self.project_repo.get_project_by_code(code=project_code)
@@ -2108,6 +2108,7 @@ class ModuleService:
                         'workspace_path': workspace_path,
                         'branch': 'main',
                         'is_active': 1,
+                        'content_status': ContentStatus.PENDING
                     })
 
                     logger.info(f"POINT module: {module_code}, session_id: {session_id}, workspace: {workspace_path}")
@@ -2266,6 +2267,17 @@ class ModuleService:
 
             # 步骤4: 调用 chat_stream 进行 analyze-prd 任务
             yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': '开始PRD模块分析...', 'progress': 35}, ensure_ascii=False)}\n\n"
+            try:
+                module_update = ModuleUpdate(content_status=ContentStatus.IN_PROGRESS)
+                await self.module_repo.update_module(
+                    module_id=module.id,
+                    data=module_update
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to update module: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'更新module失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
 
             try:
                 logger.info(f"Starting analyze-prd task: session_id={session_id}, module={module_name}")
@@ -2336,8 +2348,7 @@ class ModuleService:
             yield f"data: {json.dumps({'type': 'step', 'step': 'save_content', 'status': 'progress', 'message': '保存到模块...', 'progress': 90}, ensure_ascii=False)}\n\n"
 
             try:
-                from app.db.schemas import ModuleUpdate
-                module_update = ModuleUpdate(require_content=clarification_content)
+                module_update = ModuleUpdate(require_content=clarification_content, content_status=ContentStatus.COMPLETED)
                 await self.module_repo.update_module(
                     module_id=module.id,
                     data=module_update
