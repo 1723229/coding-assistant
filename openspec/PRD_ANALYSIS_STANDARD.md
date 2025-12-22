@@ -2,6 +2,157 @@
 
 > **Purpose:** A self-contained workflow to convert a vague Product Requirement Document (PRD) into a structured clarification list **compatible with OpenSpec proposal format**.
 > **Key Constraint:** Every clarification question must serve the goal of writing **testable Scenarios** in `WHEN...THEN` format.
+> **Output Format:** Machine-readable structure with HTML metadata comments and standardized tables for automated processing.
+
+## 0. Format Requirements (Machine-Readable Structure)
+
+### 0.1 Why Machine-Readable Format?
+
+The clarification document must be both human-readable (for PM to fill) and machine-parsable (for automated OpenSpec generation). This dual requirement enables:
+
+1. **Automated Validation** - Verify format compliance before OpenSpec generation
+2. **Navigation Indices** - Quick lookup from PRD line → clarification items and vice versa
+3. **Frontend Integration** - Display clarification content linked to PRD source
+4. **Traceability** - Track every requirement back to its PRD source
+5. **Statistics** - Calculate coverage, blockers, and completeness metrics
+
+### 0.2 Mandatory Format Elements
+
+Every clarification.md file MUST include:
+
+#### 1. HTML Metadata Comments
+
+Add before each major structure element:
+
+```markdown
+<!-- meta:section=1,type=business_value -->
+## 1. 业务价值
+
+<!-- meta:section=6.1,operation_id=op1,prd_section=6.1.3,prd_lines=212-214,operation_name=进度条查看 -->
+### 6.1 操作1: 进度条查看
+
+<!-- meta:input_spec,operation_id=op1 -->
+#### 输入规范
+```
+
+**Valid section_type values:**
+- `business_value` - Section 1 (业务价值/Business Value)
+- `tech_stack` - Section 2 (技术栈/Tech Stack)
+- `ui_ux` - Section 3 (UI/UX资源/UI/UX Resources)
+- `scope` - Section 4 (范围确认/Scope Confirmation)
+- `data_schema` - Section 5 (数据Schema映射/Data Schema Mapping)
+- `operations` - Section 6 (操作详细规范/Operation Specifications)
+- `blockers` - Section 9 (阻塞项清单/Blocker List)
+
+#### 2. Table Format with PRD Location
+
+ALL tables MUST include a "PRD定位" (PRD Location) column:
+
+```markdown
+| 字段名 | 类型 | 必填 | 说明 | PRD定位 |
+|--------|------|------|------|---------|
+| problem_id | String | 是 | 问题ID | [PRD:行217] |
+| team_leaders | JSON | 是 | 小组领导者 | [PRD:行217-小组领导者] |
+| extension_data | JSON | 否 | 扩展字段 | [需补充] |
+```
+
+**Valid PRD Location Formats:**
+- `[PRD:行214]` - Exact PRD line number
+- `[PRD:行217-小组领导者]` - Line number + specific content reference
+- `[需补充]` - Needs PM to supplement (not in PRD)
+- `[推断]` - Inferred from context
+- `[系统生成]` - System auto-generated
+
+#### 3. Operation Components (Section 6)
+
+Each operation MUST have these 7 components with HTML metadata:
+
+```markdown
+<!-- meta:section=6.1,operation_id=op1,operation_name=进度条查看 -->
+### 6.1 操作1: 进度条查看
+
+<!-- meta:basic_info,operation_id=op1 -->
+#### 基本信息
+
+<!-- meta:input_spec,operation_id=op1 -->
+#### 输入规范
+
+<!-- meta:output_spec,operation_id=op1 -->
+#### 输出规范
+
+<!-- meta:scenarios,operation_id=op1 -->
+#### 场景列表
+
+<!-- meta:errors,operation_id=op1 -->
+#### 错误处理
+
+<!-- meta:boundaries,operation_id=op1 -->
+#### 边界条件
+
+<!-- meta:test_cases,operation_id=op1 -->
+#### 测试用例
+```
+
+#### 4. Module Metadata Header
+
+Every clarification file starts with:
+
+```markdown
+# OpenSpec提议澄清文档: [Module Name]
+
+> **Module ID:** [module-id]
+> **PRD来源:** [section] [Module Name] (行[start]-[end])
+> **PRD文件:** [prd-file-path]
+> **生成时间:** [YYYY-MM-DD]
+> **文档状态:** 待产品经理审阅
+```
+
+### 0.3 Validation and Index Generation
+
+After generating `clarification.md`, the `/analyze-prd` command MUST:
+
+1. **Run validation tool:**
+   ```bash
+   cd docs/PRD-Gen && python generate_clarification_index.py
+   ```
+
+2. **Generate two files:**
+   - `clarification.md` - Human-readable questionnaire
+   - `clarification_index.json` - Machine-readable index with:
+     * Navigation indices (`by_prd_line`, `by_operation`, `by_section`, `by_scenario`)
+     * Statistics (total sections, operations, scenarios, blockers)
+     * PRD coverage analysis
+     * Metadata and traceability info
+
+3. **Validation checks:**
+   - All sections have HTML metadata comments
+   - All tables have "PRD定位" column
+   - All operations have 7 required components
+   - Operation IDs follow pattern `op\d+` (op1, op2, etc.)
+   - Section IDs are valid (numbers or dotted numbers)
+   - Line number ranges are logical (start < end)
+   - All PRD references are valid
+
+4. **If validation fails:**
+   - Display specific errors to user
+   - Fix issues in clarification.md
+   - Re-run validation until it passes
+
+5. **If validation passes:**
+   - Confirm both files ready for use
+   - Display statistics summary
+   - Guide user to next steps
+
+### 0.4 Benefits of This Format
+
+✅ **Traceability** - Every clarification item links back to PRD source line
+✅ **Automation** - Index enables automated OpenSpec proposal generation
+✅ **Frontend Integration** - JSON index powers interactive UI displays
+✅ **Validation** - Format errors caught before OpenSpec generation
+✅ **Coverage Analysis** - Identify uncovered PRD sections
+✅ **Navigation** - Bidirectional lookup between PRD and clarifications
+
+---
 
 ## 1. The "OpenSpec-Ready" Analysis Algorithm
 

@@ -77,41 +77,123 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
    - **Pass 3**: Technical Ambiguity Check → Extract for Sections C (Data Schema) & D (UI/UX)
    - **Pass 4**: Scenario Decomposition Check → Extract for Section B (Feature Breakdown)
 
-7. **Generate `docs/PRD-Gen/clarification.md`**
+7. **Generate and Validate `docs/PRD-Gen/clarification.md`** 🔴 CRITICAL: DO NOT SKIP VALIDATION
+
+   **Part A: Generate Clarification Document**
    - **IMPORTANT**: Always use the fixed filename `docs/PRD-Gen/clarification.md`
    - Use the template structure from `openspec/PRD_ANALYSIS_STANDARD.md` Section 2
    - **Write all content in the PRD's language** (detected in Step 5)
    - Add module metadata header:
      ```markdown
-     # Clarification for OpenSpec Proposal: [Module Name]
+     # OpenSpec提议澄清文档: [Module Name]
 
      > **Module ID:** [module-id]
-     > **PRD Source:** [section] (行[start]-[end])
+     > **PRD来源:** [section] [Module Name] (行[start]-[end])
+     > **PRD文件:** [prd-file-path]
+     > **生成时间:** [YYYY-MM-DD]
+     > **文档状态:** 待产品经理审阅
      ```
+   - **FORMAT REQUIREMENTS** (Machine-Readable Structure):
+     1. **HTML Metadata Comments** - Add before each section/operation/component:
+        ```markdown
+        <!-- meta:section=1,type=business_value -->
+        ## 1. 业务价值
+
+        <!-- meta:section=6.1,operation_id=op1,prd_section=6.1.3,prd_lines=212-214,operation_name=进度条查看 -->
+        ### 6.1 操作1: 进度条查看
+
+        <!-- meta:input_spec,operation_id=op1 -->
+        #### 输入规范
+        ```
+     2. **Table Format** - ALL tables MUST include "PRD定位" column:
+        ```markdown
+        | 字段名 | 类型 | 必填 | 说明 | PRD定位 |
+        |--------|------|------|------|---------|
+        | problem_id | String | 是 | 问题ID | [PRD:行217] |
+        | team_leaders | JSON | 是 | 小组领导者 | [PRD:行217-小组领导者] |
+        | extension_data | JSON | 否 | 扩展字段 | [需补充] |
+        ```
+        Valid PRD location formats:
+        - `[PRD:行214]` - Exact line number
+        - `[PRD:行217-小组领导者]` - Line number + specific content
+        - `[需补充]` - Needs PM to supplement
+        - `[推断]` - Inferred from context
+        - `[系统生成]` - System generated
+     3. **Section Types** - Use standardized section_type values:
+        - `business_value` - Section 1 (业务价值)
+        - `tech_stack` - Section 2 (技术栈)
+        - `ui_ux` - Section 3 (UI/UX资源)
+        - `scope` - Section 4 (范围确认)
+        - `data_schema` - Section 5 (数据Schema映射)
+        - `operations` - Section 6 (操作详细规范)
+        - `blockers` - Section 9 (阻塞项清单)
+     4. **Operation Components** - Each operation MUST have:
+        - `basic_info` - 基本信息 (operation name, PRD reference, permissions)
+        - `input_spec` - 输入规范 (input fields with types and validation)
+        - `output_spec` - 输出规范 (output fields with types and examples)
+        - `scenarios` - 场景列表 (WHEN...THEN scenarios with priorities)
+        - `errors` - 错误处理 (error codes and messages)
+        - `boundaries` - 边界条件 (constraints and limits)
+        - `test_cases` - 测试用例 (concrete test scenarios)
    - For Section B (Features): List each OPERATION from FEATURE_TREE and apply the "🚨 OpenSpec Testability Check"
    - For Section C (Data): Create schema mapping tables for each data source mentioned
    - For Section D (Interface): Create input/output specs for each operation
    - For Section E (Tests): Extract any test criteria mentioned in PRD
    - Fill in "Critical Blockers Summary" based on missing information
    - **Language Guidelines**:
-     - Section headers: Use PRD language (e.g., "## 章节 A: 业务价值" for Chinese)
+     - Section headers: Use PRD language (e.g., "## 1. 业务价值" for Chinese)
      - Questions/prompts: Use PRD language
      - Technical terms: Keep in English (WHEN, THEN, SHALL, API, JSON, etc.)
      - Code examples: Always in English
 
-8. **Validate Completeness**
-   - Ensure every operation has the 5 clarification sub-sections (Input/Output/Examples/Errors/Boundaries)
-   - Ensure at least one concrete WHEN...THEN example is requested for each operation
-   - Mark items that block OpenSpec generation in the Critical Blockers section
+   **Part B: IMMEDIATELY Run Validation (MANDATORY - DO NOT SKIP)**
+   🚨 **STOP! Before proceeding to Step 8, you MUST run validation:**
 
-9. **Output Summary**
-   After generating `docs/PRD-Gen/clarification.md`, provide a brief summary:
+   Run this command RIGHT AFTER generating clarification.md:
+   ```bash
+   cd docs/PRD-Gen && python generate_clarification_index.py
+   ```
+
+   This will:
+   1. Parse the markdown file
+   2. Generate `clarification_index.json` with navigation indices
+   3. Validate the format automatically
+
+   **If validation FAILS:**
+   - Display validation errors to user
+   - Fix the issues in `clarification.md`
+   - Re-run validation until it PASSES
+   - DO NOT proceed to Step 8 until validation succeeds
+
+   **If validation PASSES:**
+   - Confirm both files are ready
+   - Show validation statistics:
+     * ✅ Sections: [count]
+     * ✅ Operations: [count]
+     * ✅ Scenarios: [count]
+     * ✅ Validation passed!
+   - Generated files:
+     * ✅ docs/PRD-Gen/clarification.md (human-readable)
+     * ✅ docs/PRD-Gen/clarification_index.json (machine-readable)
+
+8. **Output Summary** (Only after validation passes)
+   After successful generation and validation, provide:
    - Module name and ID
    - Number of operations identified
+   - Number of scenarios generated
    - Number of critical blockers found
+   - Validation status (✅ or ❌)
+   - Files generated:
+     * `docs/PRD-Gen/clarification.md` - Human-readable questionnaire
+     * `docs/PRD-Gen/clarification_index.json` - Machine-readable index
+   - Statistics summary:
+     * Total sections
+     * Total operations with all required components
+     * PRD coverage percentage
+     * Required items vs optional items
    - Recommended next steps for PM
 
-10. **Handle Review Messages (Iterative Refinement)**
+9. **Handle Review Messages (Iterative Refinement)**
     - If user provides review messages during the conversation, recognize these patterns:
       - `User Review on "Section X", msg: "review message"`
       - `Review for Section X: message`
@@ -144,7 +226,7 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
 
 Example 1: Initial Analysis (Chinese PRD)
 ```
-User: /analyze-prd --module "D1组建团队" --feature-tree "docs/PRD-Gen/FEATURE_TREE.md" --prd "docs/原始PRD.pdf"
+User: /analyze-prd --module "D1组建团队" --feature-tree "docs/PRD-Gen/FEATURE_TREE.md" --prd "doc/System-Design_text_only.md"
 
 Agent: [Reads FEATURE_TREE.md]
        [Locates module: d1-team-formation]
@@ -168,22 +250,45 @@ Agent: [Reads FEATURE_TREE.md]
        [Reads openspec/PRD_ANALYSIS_STANDARD.md]
        [Extracts PRD lines 212-222]
        [Executes 4-pass analysis on scoped content]
-       [Generates docs/PRD-Gen/clarification.md in Chinese]
+       [Generates docs/PRD-Gen/clarification.md in Chinese with format markers]
 
-       ✅ 已生成 docs/PRD-Gen/clarification.md
+       📝 Generating clarification.md with machine-readable format...
+       ✅ Generated docs/PRD-Gen/clarification.md
 
-       摘要:
-       - 模块: D1组建团队 (d1-team-formation)
-       - 识别到 9 个操作
-       - 发现 6 个关键阻塞项:
-         * 业务价值量化指标缺失
-         * 人员配置的数据schema未定义
-         * 甘特图组件的输入输出格式未定义
-         * 子任务的状态流转规则不明确
-         * UI/UX设计稿缺失
-         * 测试数据准备说明缺失
+       🔨 Running validation and index generation...
+       📝 Parsing clarification.md...
+       🔨 Generating index...
+       💾 Writing to clarification_index.json...
 
-       下一步: 请填写 docs/PRD-Gen/clarification.md，然后运行 /openspec:proposal
+       ✅ Generation complete!
+          - Sections: 11
+          - Operations: 9
+          - Scenarios: 27
+
+       🔍 Running validation...
+       ✅ Validation passed!
+
+       📊 Summary:
+       - Module: D1组建团队 (d1-team-formation)
+       - Operations: 9 (all with required components)
+       - Scenarios: 27 testable scenarios generated
+       - Critical blockers: 6
+         * 业务价值量化指标缺失 (Section 1.2)
+         * 甘特图组件选型未定 (Section 2.5)
+         * UI/UX蓝湖链接待提供 (Section 3)
+         * 扩展字段定义缺失 (Section 5.3)
+         * 测试数据需求未明确 (Section 8)
+       - PRD Coverage: 72.7% (8/11 lines covered)
+
+       📁 Generated Files:
+       ✅ docs/PRD-Gen/clarification.md (human-readable)
+       ✅ docs/PRD-Gen/clarification_index.json (machine-readable)
+
+       🎯 Next Steps:
+       1. 产品经理填写clarification.md中的待填写项
+       2. 确认或更新"待确认"的范围项
+       3. 解决6个阻塞项
+       4. 运行 /openspec:proposal 生成正式提议
 ```
 
 Example 2: Review and Update (Same Conversation)
@@ -295,3 +400,22 @@ The agent should recognize and handle these review message formats:
 - Analysis is scoped to ONLY the specified module's PRD lines
 - Support iterative refinement through review messages in the same conversation
 - Maintain review history for traceability
+- **Format compliance is mandatory**:
+  - All sections must have HTML metadata comments
+  - All tables must have "PRD定位" column
+  - All operations must have 7 required components
+  - Validation will fail if format requirements are not met
+- **Validation tools**:
+  - `generate_clarification_index.py` - Main generation and validation tool
+  - `validate_with_schema.py` - JSON Schema validation (optional)
+  - `example_usage.py` - Usage examples for working with the generated index
+- **Documentation**:
+  - `docs/PRD-Gen/README.md` - Complete usage guide
+  - `docs/PRD-Gen/IMPLEMENTATION_GUIDE.md` - Implementation and integration guide
+  - `docs/PRD-Gen/clarification_schema.json` - JSON Schema definition
+- **Automatic validation ensures**:
+  - Metadata completeness (module_id, prd_file, prd_section, etc.)
+  - Structural integrity (valid section types, operation IDs)
+  - Navigation index consistency (all references are valid)
+  - PRD traceability (all items link back to PRD source)
+
