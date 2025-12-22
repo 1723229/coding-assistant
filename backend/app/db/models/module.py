@@ -18,6 +18,13 @@ class ModuleType(str, enum.Enum):
     POINT = "POINT"  # 功能点（独立功能，创建session和workspace）
 
 
+class ContentStatus(str, enum.Enum):
+    """内容状态枚举（仅叶子节点）"""
+    PENDING = "PENDING"  # 待开始
+    IN_PROGRESS = "IN_PROGRESS"  # 进行中
+    COMPLETED = "COMPLETED"  # 已完成
+
+
 class Module(Base, BaseModel):
     """
     模块表
@@ -34,6 +41,7 @@ class Module(Base, BaseModel):
     code = Column(String(64), nullable=False, comment="模块代码，在Project内唯一")
     url = Column(String(512), nullable=True, comment="可访问的链接（NODE类型与子节点共享）")
     require_content = Column(LONGTEXT, nullable=True, comment="功能需求描述")
+    content_status = Column(SQLEnum(ContentStatus), nullable=True, comment="内容状态（仅叶子节点）：PENDING-待开始 IN_PROGRESS-进行中 COMPLETED-已完成")
     preview_url = Column(String(512), nullable=True, comment="预览页面URL")
     spec_file_path = Column(String(512), nullable=True, comment="spec_file_path")
     spec_content = Column(LONGTEXT, nullable=True, comment="spec_content")

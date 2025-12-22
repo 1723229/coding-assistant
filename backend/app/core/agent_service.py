@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, Any, Optional, AsyncGenerator, List
@@ -532,8 +533,9 @@ class AgentService:
                         metadata=event.get("metadata"),
                     )
 
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as e:
             logger.info(f"Stream cancelled for session: {session_id}")
+            logger.error(f"Stream cancelled for session: {session_id}, error reason: {type(e).__name__}")
             yield ChatMessage(type="interrupted", content="Stream cancelled")
 
             # Clean up the session on cancellation

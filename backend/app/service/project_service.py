@@ -12,6 +12,7 @@ from app.config.logging_config import log_print
 from app.utils.model.response_model import BaseResponse, ListResponse
 from app.db.repository import ProjectRepository, ModuleRepository
 from app.db.schemas import ProjectCreate, ProjectUpdate, ProjectResponse
+from app.db.schemas.module import ModuleContentStatusResponse
 
 logger = logging.getLogger(__name__)
 
@@ -211,3 +212,38 @@ class ProjectService:
         except Exception as e:
             logger.error(f"删除项目失败: {e}", exc_info=True)
             return BaseResponse.error(message=f"删除项目失败: {str(e)}")
+
+    @log_print
+    async def get_leaf_modules_content_status(self, project_id: int):
+        """
+        获取项目下所有叶子模块(POINT类型)的ID和content_status
+
+        返回格式：[{"id": 1, "content_status": "PENDING"}, ...]
+        """
+        try:
+            # Check if project exists
+            project = await self.project_repo.get_project_by_id(project_id=project_id)
+            if not project:
+                return BaseResponse.not_found(message=f"项目 ID {project_id} 不存在")
+
+            # Get all leaf modules (POINT type)
+            leaf_modules = await self.module_repo.get_leaf_modules(project_id=project_id)
+
+            # Convert to response schema
+            items = [
+                ModuleContentStatusResponse(
+                    id=module.id,
+                    content_status=module.content_status
+                )
+                for module in leaf_modules
+            ]
+
+            return ListResponse.success(
+                items=items,
+                total=len(items),
+                message=f"获取项目叶子模块状态成功"
+            )
+
+        except Exception as e:
+            logger.error(f"获取项目叶子模块状态失败: {e}", exc_info=True)
+            return BaseResponse.error(message=f"获取项目叶子模块状态失败: {str(e)}")
