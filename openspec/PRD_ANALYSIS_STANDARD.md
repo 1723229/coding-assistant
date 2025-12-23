@@ -174,12 +174,32 @@ The Agent MUST apply the following **four-pass analysis** (derived from team gui
 *Team Rule: Specs must serve as training docs for new developers.*
 *OpenSpec Rule: `design.md` (if needed) and `tasks.md` must be clear enough for a junior developer to implement.*
 
-*   **Heuristic:** Does the PRD define the **Tech Stack**, **Environment**, and **Code Standards**?
-    *   *If NO:* The generated `context.md` MUST ask for:
-        *   **Backend/Frontend Stack Preference:** (e.g., Python vs Node, React vs Vue)
-        *   **Database Selection:** (e.g., Postgres vs MySQL)
-        *   **Deployment Target:** (e.g., Private Cloud vs SaaS)
-        *   **Existing Codebase Reference:** (e.g., "Follow pattern in `auth/` module")
+*   **Step 1: Check Common Knowledge Base**
+    *   Does `openspec/COMMON_KNOWLEDGE.md` exist?
+    *   If YES: Read and extract tech stack information:
+        *   Backend framework and version
+        *   Frontend framework and version
+        *   Database type and version
+        *   Deployment environment
+        *   Third-party dependencies
+        *   Architecture patterns (microservices, monolith, etc.)
+
+*   **Step 2: Evaluate PRD Tech Stack Completeness**
+    *   **Heuristic:** Does the PRD define the **Tech Stack**, **Environment**, and **Code Standards**?
+    *   **If COMMON_KNOWLEDGE.md exists and has complete tech stack info:**
+        *   Pre-fill Section F (Technology Stack) in `clarification.md` with info from COMMON_KNOWLEDGE.md
+        *   Mark each pre-filled item with `[来源: COMMON_KNOWLEDGE.md]` or `[Source: COMMON_KNOWLEDGE.md]`
+        *   Only ask for clarification on items NOT covered in COMMON_KNOWLEDGE.md
+        *   Add note: "✅ 技术栈已从项目公共知识库自动填充" / "✅ Tech stack auto-filled from project common knowledge base"
+    *   **If COMMON_KNOWLEDGE.md missing or incomplete:**
+        *   The generated `clarification.md` MUST ask for:
+            *   **Backend/Frontend Stack Preference:** (e.g., Python vs Node, React vs Vue)
+            *   **Database Selection:** (e.g., Postgres vs MySQL)
+            *   **Deployment Target:** (e.g., Private Cloud vs SaaS)
+            *   **Existing Codebase Reference:** (e.g., "Follow pattern in `auth/` module")
+    *   **If PRD has tech stack info that conflicts with COMMON_KNOWLEDGE.md:**
+        *   Flag as a warning for user to review
+        *   Ask: "PRD specifies [X] but COMMON_KNOWLEDGE.md says [Y], which should be used?"
 
 ### Pass 3: Technical Ambiguity Check (The "SRS" + OpenSpec Scenario Foundation)
 *Team Rule: Requirements must be "Professional & Unambiguous" (No guessing).*

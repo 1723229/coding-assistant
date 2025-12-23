@@ -61,10 +61,29 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
      ```
    - Ask user to confirm before proceeding (optional)
 
-4. **Read the Standard**
+4. **Read Common Knowledge Base**
+   - Check if `openspec/COMMON_KNOWLEDGE.md` exists
+   - If exists, extract tech stack information:
+     * Backend framework and version
+     * Frontend framework and version
+     * Database type and version
+     * Deployment environment
+     * Third-party dependencies
+     * Architecture patterns (microservices, monolith, etc.)
+   - Store for use in Section 2 (Technology Stack)
+   - Display summary:
+     ```
+     📚 Common Knowledge Loaded:
+     - Backend: [framework and version]
+     - Frontend: [framework and version]
+     - Database: [database type and version]
+     - Deployment: [environment]
+     ```
+
+5. **Read the Standard**
    - Read `openspec/PRD_ANALYSIS_STANDARD.md` to internalize the 4-pass algorithm
 
-5. **Extract Scoped PRD Content**
+6. **Extract Scoped PRD Content**
    - Read the PRD document from provided path
    - Extract ONLY the lines specified in the feature tree (e.g., lines 212-222)
    - Include parent L1 section context if needed for understanding
@@ -73,7 +92,7 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
 6. **Execute Four-Pass Analysis (Scoped)**
    Apply each pass to the SCOPED PRD content only:
    - **Pass 1**: Value & Root Need Check → Extract for Section A (Business Value)
-   - **Pass 2**: Developer Onboarding Check → Extract for Section F (Tech Stack)
+   - **Pass 2**: Developer Onboarding Check → Pre-fill Section F (Tech Stack) from COMMON_KNOWLEDGE.md if available
    - **Pass 3**: Technical Ambiguity Check → Extract for Sections C (Data Schema) & D (UI/UX)
    - **Pass 4**: Scenario Decomposition Check → Extract for Section B (Feature Breakdown)
 
