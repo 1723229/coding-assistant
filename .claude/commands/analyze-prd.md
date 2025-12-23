@@ -24,6 +24,8 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
    - `--module`: Module/function name or ID (e.g., "D1组建团队" or "d1-team-formation")
    - `--feature-tree`: Path to FEATURE_TREE.md file (e.g., "docs/PRD-Gen/FEATURE_TREE.md")
    - `--prd`: Path to original PRD document (PDF/Markdown/Text)
+2. User may provide(optonal):
+   - `--ddd`: Path to DDD domain design file (Markdown)
 2. Read `openspec/PRD_ANALYSIS_STANDARD.md` to understand the analysis standard
 3. Read `openspec/COMMON_KNOWLEDGE.md` to collect common knowledges related
 
@@ -33,6 +35,7 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
    - Extract module name/ID from `--module` parameter
    - Extract feature tree path from `--feature-tree` parameter
    - Extract PRD document path from `--prd` parameter
+   - Extract DDD document path from `--ddd` parameter (if present)
 
 2. **Read Feature Tree and Locate Module**
    - Read the FEATURE_TREE.md file from provided path
