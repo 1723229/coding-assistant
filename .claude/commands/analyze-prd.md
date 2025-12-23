@@ -94,10 +94,15 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
 
 6. **Execute Four-Pass Analysis (Scoped)**
    Apply each pass to the SCOPED PRD content only:
-   - **Pass 1**: Value & Root Need Check → Extract for Section A (Business Value)
-   - **Pass 2**: Developer Onboarding Check → Pre-fill Section F (Tech Stack) from COMMON_KNOWLEDGE.md if available
-   - **Pass 3**: Technical Ambiguity Check → Extract for Sections C (Data Schema) & D (UI/UX)
-   - **Pass 4**: Scenario Decomposition Check → Extract for Section B (Feature Breakdown)
+   - **Pass 1**: Developer Onboarding Check → Pre-fill Section F (Tech Stack) from COMMON_KNOWLEDGE.md if available
+   - **Pass 2**: Technical Ambiguity Check → Extract for Sections C (Data Schema) & D (UI/UX)
+   - **Pass 3**: Scenario Decomposition Check → Extract for Section B (Feature Breakdown)
+
+   **IMPORTANT: Skip the following sections:**
+   - ❌ DO NOT generate "业务价值" (Business Value) section
+   - ❌ DO NOT generate deployment environment clarification questions
+   - ❌ DO NOT ask about business metrics or pain points
+   - ✅ ONLY focus on technical specifications and implementation details
 
 7. **Generate and Validate `docs/PRD-Gen/clarification.md`** 🔴 CRITICAL: DO NOT SKIP VALIDATION
 
@@ -168,6 +173,106 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
      - Technical terms: Keep in English (WHEN, THEN, SHALL, API, JSON, etc.)
      - Code examples: Always in English
 
+   **7.5 Clarification Question Formatting Rules**
+
+   When generating clarification questions (especially in "待明确" sections), ALWAYS use structured formats:
+
+   **Rule 1: Convert Yes/No Questions → Checkboxes**
+   - If question has 2-3 possible answers → Use checkbox list
+   - Apply this to: Logic rules, workflow modes, processing methods, scope decisions
+   - Always include "其他: ___________" option for flexibility
+   - Example:
+     ```markdown
+     **审批流转模式:**
+     - [ ] 串行审批(逐层依次审批)
+     - [ ] 并行审批(所有层级同时进行)
+     - [ ] 其他: ___________
+     ```
+
+   **Rule 2: Convert Logic/Rule Questions → Checkbox with Description**
+   - If question explains a rule or logic → Convert to checkbox with explanation
+   - Apply this to: Business rules, validation logic, calculation methods
+   - Example:
+     ```markdown
+     **或签逻辑确认:**
+     - [ ] 或签为true时任意一人通过即可，为false时所有人都需通过
+     - [ ] 采用其他规则: ___________
+     ```
+
+   **Rule 3: Convert Numeric/Limit Questions → Fill-in-the-blank**
+   - If question asks for numbers, limits, ranges → Use blank line format
+   - Apply this to: Quantity limits, time ranges, size constraints
+   - Example:
+     ```markdown
+     **审批层级限制:**
+     - 最多支持 _______ 个审批层级
+     - 每层最多 _______ 个审批人
+     ```
+
+   **Rule 4: NEVER Use Unstructured Blockquote Lists**
+   - ❌ WRONG:
+     ```markdown
+     > **待明确:**
+     > - Question 1?
+     > - Question 2?
+     ```
+   - ✅ RIGHT:
+     ```markdown
+     **Topic Title:**
+     - [ ] Option 1 (explanation)
+     - [ ] Option 2 (explanation)
+     - [ ] 其他: ___________
+     ```
+
+   **Rule 5: Group Related Questions Under Same Topic**
+   - Combine related questions into one structured block
+   - Example: Group all approval logic questions together, not separately
+   - Each group should have a clear topic title
+
+   **Rule 6: Deduplication - NO Duplicate Questions**
+   - Before adding a clarificationon, check if the same question already exists
+   - If a similar question is found in any section, skip adding the duplicate
+   - Maintain a running list of all questions to prevent duplication across sections
+   - Use semantic similarity matching (e.g., "审批流转模式" and "审批模式" are the same)
+   - Example of deduplication:
+     ```markdown
+     ❌ WRONG (duplicate):
+     Section 5: **审批流转模式:** [checkboxes]
+     Section 6: **审批模式:** [checkboxes]  # This is a duplicate!
+
+     ✅ RIGHT (deduplicated):
+     Section 5: **审批流转模式:** [checkboxes]
+     Section 6: (No duplicate question, reuse reference to Section 5)
+     ```
+
+   **Rule 7: Consolidate Clarification Questions in Dedicated Section**
+   - Create a new "待澄清问题汇总" (Clarification Questions Summary) section
+   - Place ALL clarification questions in this dedicated section
+   - Organize by category: Data Schema, UI/UX, Business Logic, Technical Decisions
+   - Link back to relevant sections in the document
+   - Format:
+     ```markdown
+     ## 待澄清问题汇总
+
+     ### 数据Schema相关
+     **[Section 5.1] 用户权限字段:**
+     - [ ] 使用角色ID引用 (role_id)
+     - [ ] 使用权限位掩码 (permission_bits)
+     - [ ] 其他: ___________
+
+     ### UI/UX交互相关
+     **[Section 3.2] 审批流转模式:**
+     - [ ] 串行审批(逐层依次审批)
+     - [ ] 并行审批(所有层级同时进行)
+     - [ ] 其他: ___________
+     ```
+
+   **Scope Guidance (Default: Option A)**:
+   - Apply structured formats to: Boundary conditions, logic rules, technical decisions, numeric limits
+   - Apply deduplication to ALL sections before generating final document
+   - Consolidate ALL questions in dedicated "待澄清问题汇总" section
+   - Target sections: Section 5 (Data Schema), Section 6 (Operations), boundary condition tables
+
    **Part B: IMMEDIATELY Run Validation (MANDATORY - DO NOT SKIP)**
    🚨 **STOP! Before proceeding to Step 8, you MUST run validation:**
 
@@ -176,14 +281,23 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
    cd docs/PRD-Gen && python generate_clarification_index.py
    ```
 
-   This will:
+    This will:
    1. Parse the markdown file
    2. Generate `clarification_index.json` with navigation indices
    3. Validate the format automatically
+   4. Check structured format compliance (Section 7.5 rules):
+      - No unstructured blockquote lists with "待明确:" pattern
+      - All clarification questions use structured formats (checkboxes or fill-in-the-blank)
+      - Boundary conditions and logic rules use structured formats
+      - Numeric/limit questions use fill-in-the-blank format
 
    **If validation FAILS:**
    - Display validation errors to user
-   - Fix the issues in `clarification.md`
+   - **Format compliance errors**: If unstructured "待明确:" blockquotes detected:
+     * Identify the section(s) with unstructured questions
+     * Convert to structured format per Section 7.5 rules
+     * Re-generate clarification.md with corrected format
+   - Fix other issues in `clarification.md` (metadata, tables, PRD定位)
    - Re-run validation until it PASSES
    - DO NOT proceed to Step 8 until validation succeeds
 
@@ -385,7 +499,65 @@ Agent: [Reads FEATURE_TREE.md]
          * Approval role mapping not defined
          * UI/UX mockups missing
 
-       Next: Please fill docs/PRD-Gen/clarification.md, then run /openspec:proposal
+ Next: Please fill docs/PRD-Gen/clarification.md, then run /openspec:proposal
+```
+
+**Example 4: Structured Clarification Questions (After Formatting Rules Update)**
+```
+User: /analyze-prd --module "D1组建团队" --feature-tree "docs/PRD-Gen/FEATURE_TREE.md" --prd "doc/System-Design_text_only.md"
+
+Agent: [Reads FEATURE_TREE.md and PRD]
+       [Applies 4-pass analysis]
+       [Generates clarification.md with NEW structured format]
+
+       📝 Section 5.4 (审批节点配置) now uses structured questions:
+
+       ```markdown
+       ### 5.4 审批节点人员配置存储
+
+       | 字段名 | 数据类型 | 必填 | 说明 | PRD定位 |
+       |--------|---------|------|------|------------|
+       | approval_level | INT | 是 | 审批层级 | [PRD:行217-审批层级] |
+       | user_ids | JSON | 是 | 审批人员ID列表 | [PRD:行217-下拉多选框] |
+       | is_or_sign | BOOLEAN | 是 | 是否或签 | [PRD:行217-或签，默认为关] |
+
+       > **待明确:**
+
+       **或签逻辑确认:**
+       - [ ] 或签为true时任意一人通过即可，为false时所有人都需通过
+       - [ ] 采用其他规则: ___________
+
+       **审批流转模式:**
+       - [ ] 串行审批（逐层依次审批）
+       - [ ] 并行审批（所有层级同时进行）
+       - [ ] 混合模式: ___________
+
+       **审批流转处理方式:**
+       - [ ] 由工作流引擎统一处理
+       - [ ] 自研审批逻辑
+       - [ ] 其他: ___________
+
+       **审批层级限制:**
+       - 最多支持 _______ 个审批层级
+       - 每层最多 _______ 个审批人
+
+       **PRD定位:** [需补充] - PRD未明确审批流转逻辑细节
+       ```
+
+       ✅ Benefits of structured format:
+       - PM can quickly check boxes instead of writing free text
+       - Machine-parsable for tracking completion status
+       - Clearer options reduce ambiguity
+       - Fill-in-the-blank prompts for numeric values
+
+       🔨 Running validation...
+       ✅ Validation passed! All clarification questions use structured formats.
+
+       📊 Summary:
+       - Module: D1组建团队 (d1-team-formation)
+       - Operations: 8 (all with structured clarification questions)
+       - Structured questions: 45 (checkboxes: 32, fill-in-the-blank: 13)
+       - Format compliance: 100% ✅
 ```
 
 **Review Message Patterns**
