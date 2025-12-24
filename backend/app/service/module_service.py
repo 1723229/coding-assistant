@@ -2256,11 +2256,46 @@ class ModuleService:
 
             yield f"data: {json.dumps({'type': 'step', 'step': 'validate_prd', 'status': 'success', 'message': 'PRD文件验证成功', 'progress': 20}, ensure_ascii=False)}\n\n"
 
-            # 步骤3: 构建 prompt
-            yield f"data: {json.dumps({'type': 'step', 'step': 'build_prompt', 'status': 'progress', 'message': '构建分析请求...', 'progress': 25}, ensure_ascii=False)}\n\n"
+            # 步骤3: 复制文件到新的 session workspace
+            yield f"data: {json.dumps({'type': 'step', 'step': 'copy_files', 'status': 'progress', 'message': '复制PRD文件到新workspace...', 'progress': 22}, ensure_ascii=False)}\n\n"
+
+            import shutil
+            new_workspace_dir = Path.home() / "workspace" / session_id
+            new_workspace_dir.mkdir(parents=True, exist_ok=True)
+
+            try:
+                # 复制 FEATURE_TREE.md
+                new_feature_tree_path = new_workspace_dir / "FEATURE_TREE.md"
+                shutil.copy2(feature_tree_path, new_feature_tree_path)
+                logger.info(f"Copied FEATURE_TREE.md to {new_feature_tree_path}")
+
+                # 复制 prd.md
+                new_prd_path = new_workspace_dir / "prd.md"
+                shutil.copy2(prd_file_path, new_prd_path)
+                logger.info(f"Copied prd.md to {new_prd_path}")
+
+                # 复制 PRD_OVERVIEW.md（如果存在）
+                prd_overview_path = prd_workspace_dir / "PRD_OVERVIEW.md"
+                if prd_overview_path.exists():
+                    new_prd_overview_path = new_workspace_dir / "PRD_OVERVIEW.md"
+                    shutil.copy2(prd_overview_path, new_prd_overview_path)
+                    logger.info(f"Copied PRD_OVERVIEW.md to {new_prd_overview_path}")
+                else:
+                    logger.warning(f"PRD_OVERVIEW.md not found in {prd_workspace_dir}, skipping")
+
+                yield f"data: {json.dumps({'type': 'step', 'step': 'copy_files', 'status': 'success', 'message': 'PRD文件复制成功', 'progress': 25}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"Failed to copy files: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': f'文件复制失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 步骤4: 构建 prompt
+            yield f"data: {json.dumps({'type': 'step', 'step': 'build_prompt', 'status': 'progress', 'message': '构建分析请求...', 'progress': 27}, ensure_ascii=False)}\n\n"
 
             # 按照规范构建 prompt: --module "模块名称" --feature-tree "路径" --prd "路径"
-            prompt = f'--module "{module_name}" --feature-tree "{feature_tree_path.absolute()}" --prd "{prd_file_path.absolute()}"'
+            # 使用新workspace中的文件名（不带路径前缀）
+            prompt = f'--module "{module_name}" --feature-tree "FEATURE_TREE.md" --prd "prd.md"'
 
             logger.info(f"analyze-prd prompt: {prompt}")
             yield f"data: {json.dumps({'type': 'step', 'step': 'build_prompt', 'status': 'success', 'message': 'Prompt 构建完成', 'progress': 30}, ensure_ascii=False)}\n\n"
