@@ -2268,25 +2268,25 @@ class ModuleService:
                 # 复制 FEATURE_TREE.md
                 new_feature_tree_path = new_workspace_dir / "FEATURE_TREE.md"
                 shutil.copy2(feature_tree_path, new_feature_tree_path)
-                # 添加可读可写权限
-                os.chmod(new_feature_tree_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH)
-                logger.info(f"Copied FEATURE_TREE.md to {new_feature_tree_path} with read/write permissions")
+                # 添加所有用户可读可写权限
+                os.chmod(new_feature_tree_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)
+                logger.info(f"Copied FEATURE_TREE.md to {new_feature_tree_path} with read/write permissions for all users")
 
                 # 复制 prd.md
                 new_prd_path = new_workspace_dir / "prd.md"
                 shutil.copy2(prd_file_path, new_prd_path)
-                # 添加可读可写权限
-                os.chmod(new_prd_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH)
-                logger.info(f"Copied prd.md to {new_prd_path} with read/write permissions")
+                # 添加所有用户可读可写权限
+                os.chmod(new_prd_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)
+                logger.info(f"Copied prd.md to {new_prd_path} with read/write permissions for all users")
 
                 # 复制 PRD_OVERVIEW.md（如果存在）
                 prd_overview_path = prd_gen_dir / "PRD_OVERVIEW.md"
                 if prd_overview_path.exists():
                     new_prd_overview_path = new_workspace_dir / "PRD_OVERVIEW.md"
                     shutil.copy2(prd_overview_path, new_prd_overview_path)
-                    # 添加可读可写权限
-                    os.chmod(new_prd_overview_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH)
-                    logger.info(f"Copied PRD_OVERVIEW.md to {new_prd_overview_path} with read/write permissions")
+                    # 添加所有用户可读可写权限
+                    os.chmod(new_prd_overview_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)
+                    logger.info(f"Copied PRD_OVERVIEW.md to {new_prd_overview_path} with read/write permissions for all users")
                 else:
                     logger.warning(f"PRD_OVERVIEW.md not found in {prd_workspace_dir}, skipping")
 
