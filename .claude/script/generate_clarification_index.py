@@ -224,6 +224,96 @@ class ClarificationParser:
         # Return first 30 chars if no specific pattern found
         return prefix[-30:] if len(prefix) > 30 else prefix
 
+    def parse_clarification_wrapper(self, line: str) -> Optional[Dict[str, Any]]:
+        """Parse HTML clarification wrapper comments."""
+        # Match: <!-- clarification:start,id=c-5.2-1,type=data_schema,... -->
+        start_pattern = r'<!-- clarification:start,(.+?) -->'
+        end_pattern = r'<!-- clarification:end -->'
+
+        start_match = re.search(start_pattern, line)
+        if start_match:
+            attrs = {}
+            for pair in start_match.group(1).split(','):
+                if '=' in pair:
+                    key, value = pair.split('=', 1)
+                    attrs[key.strip()] = value.strip()
+            return {'wrapper_type': 'start', 'attributes': attrs}
+
+        if re.search(end_pattern, line):
+            return {'wrapper_type': 'end'}
+
+        return None
+
+    def extract_wrapped_clarifications(self) -> List[Dict[str, Any]]:
+        """Extract clarifications with HTML wrapper metadata."""
+        wrapped_items = []
+        current_item = None
+        content_lines = []
+
+        for i, line in enumerate(self.lines):
+            wrapper = self.parse_clarification_wrapper(line)
+
+            if wrapper and wrapper['wrapper_type'] == 'start':
+                attrs = wrapper['attributes']
+                current_item = {
+                    'id': attrs.get('id'),
+                    'type': attrs.get('type'),
+                    'section': attrs.get('section'),
+                    'operation_id': attrs.get('operation_id'),
+                    'prd_ref': attrs.get('prd_ref'),
+                    'priority': attrs.get('priority', 'medium'),
+                    'status': attrs.get('status', 'pending'),
+                    'md_line_start': i + 1,
+                    'content': []
+                }
+                content_lines = []
+
+            elif wrapper and wrapper['wrapper_type'] == 'end':
+                if current_item:
+                    current_item['content'] = '\n'.join(content_lines).strip()
+                    current_item['md_line_end'] = i + 1
+
+                    # Parse question and options
+                    question, options = self._parse_question_content(current_item['content'])
+                    current_item['question'] = question
+                    current_item['options'] = options
+
+                    wrapped_items.append(current_item)
+                    current_item = None
+
+            elif current_item is not None:
+                content_lines.append(line)
+
+        return wrapped_items
+
+    def _parse_question_content(self, content: str) -> Tuple[str, List[Dict]]:
+        """Parse question text and options from markdown."""
+        lines = content.split('\n')
+        question = ""
+        options = []
+
+        for line in lines:
+            line = line.strip()
+            if line.startswith('**') and line.endswith('**'):
+                # Extract question title
+                question = line.strip('*').strip(':')
+            elif line.startswith('- [ ]'):
+                # Checkbox option
+                options.append({
+                    'type': 'checkbox',
+                    'text': line[5:].strip(),
+                    'checked': False
+                })
+            elif '_____' in line or '____' in line:
+                # Fill-in-the-blank option
+                options.append({
+                    'type': 'blank',
+                    'text': line,
+                    'value': None
+                })
+
+        return question, options
+
     def extract_sections(self) -> List[Dict[str, Any]]:
         """Extract all sections from markdown."""
         sections = []
@@ -645,8 +735,8 @@ def main():
 
     parser = argparse.ArgumentParser(description='Generate and validate PRD clarification index')
     parser.add_argument('--validate-only', action='store_true', help='Only validate existing files')
-    parser.add_argument('--md-file', default='clarification.md', help='Path to clarification.md')
-    parser.add_argument('--json-file', default='clarification_index.json', help='Path to output JSON')
+    parser.add_argument('--md-file', default='../../docs/PRD-Gen/clarification.md', help='Path to clarification.md')
+    parser.add_argument('--json-file', default='../../docs/PRD-Gen/clarification_index.json', help='Path to output JSON')
 
     args = parser.parse_args()
 

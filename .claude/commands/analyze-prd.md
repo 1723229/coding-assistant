@@ -83,6 +83,17 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
      - Deployment: [environment]
      ```
 
+   **4.5 Create Tech Stack Filter Index**
+   From loaded COMMON_KNOWLEDGE.md, create mental index of known tech stack:
+   - **Backend**: Java 8, Spring Boot 2.3.2, Spring Cloud Hoxton.SR9, Nacos
+   - **Frontend**: React 16.9.0 (JavaScript, NOT TypeScript), Ant Design 3.26.20, Redux, React Router 4
+   - **Database**: MySQL (actual deployment), supports PostgreSQL/Oracle/SQL Server
+   - **ORM**: JPA, MyBatis, MyBatis-Plus
+   - **Middleware**: Redis (cache), RabbitMQ (message queue), MinIO (object storage)
+   - **Architecture**: Spring Cloud Microservices with Nacos service registration
+   - **API Docs**: Swagger 2.9.2
+   - **Build Tools**: Webpack (frontend), Yarn (package manager)
+
 5. **Read the Standard**
    - Read `openspec/PRD_ANALYSIS_STANDARD.md` to internalize the 4-pass algorithm
 
@@ -103,6 +114,108 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
    - ❌ DO NOT generate deployment environment clarification questions
    - ❌ DO NOT ask about business metrics or pain points
    - ✅ ONLY focus on technical specifications and implementation details
+
+   **6.4 CRITICAL: Section 2 Content Policy** 🔴
+
+   **Section 2 (技术栈) Generation Rules:**
+   - ✅ **MUST** contain ONLY pre-filled tech stack from COMMON_KNOWLEDGE.md (subsections 2.1-2.4)
+   - ❌ **DO NOT** create "2.5 待明确的技术选型" or any clarification subsection
+   - ❌ **DO NOT** add any clarification questions (`<!-- clarification:start -->`) in Section 2
+   - ❌ **DO NOT** ask generic tech stack questions anywhere (database, framework, UI library, etc.)
+
+   **Feature-Specific Tech Choices Placement:**
+   - Feature-specific technology choices (Excel library, visualization components, integration methods, etc.) **MUST be placed in Section 6 (Operations)**
+   - Place them within the relevant operation's specification
+   - Examples:
+     * Excel library choice → Section 6.6 (Export Template operation) input/output spec
+     * Flowchart component → Section 6.10 (Progress Graph operation) output spec
+     * API integration method → Relevant operation's integration spec
+
+   **6.5 CRITICAL: Tech Stack Filtering Rule** 🔴
+
+   **Rule 1: Section 2 Pre-fill Only**
+   Section 2 (技术栈) MUST:
+   - ✅ Pre-fill known tech stack from COMMON_KNOWLEDGE.md (2.1-2.4 subsections only)
+   - ❌ NOT include any "待明确的技术选型" subsection (no Section 2.5)
+   - ❌ NOT include any clarification questions (`<!-- clarification:start -->`)
+   - ✅ End immediately after Section 2.4 (架构模式)
+
+   **Rule 2: Feature-Specific Tech Questions Classification**
+   Before generating ANY clarification question in ALL sections, classify as:
+   - **Generic tech stack** (already in COMMON_KNOWLEDGE.md) → Skip entirely, never ask
+   - **Feature-specific tech choice** (not in COMMON_KNOWLEDGE.md) → Place in Section 6 (relevant operation)
+
+   **❌ SKIP entirely (Generic - already known in COMMON_KNOWLEDGE.md):**
+   - Database selection (Known: MySQL for actual deployment, supports PostgreSQL/Oracle/SQL Server)
+   - Frontend framework (Known: React 16.9.0 JavaScript, NOT TypeScript)
+   - UI component library (Known: Ant Design 3.26.20)
+   - Backend framework (Known: Java 8, Spring Boot 2.3.2, Spring Cloud Hoxton.SR9)
+   - Microservices architecture (Known: Yes, Spring Cloud with Nacos)
+   - Message queue (Known: RabbitMQ)
+   - Cache solution (Known: Redis)
+   - File storage (Known: MinIO)
+   - API documentation (Known: Swagger 2.9.2)
+   - ORM framework (Known: JPA, MyBatis, MyBatis-Plus)
+   - State management (Known: Redux)
+   - Frontend routing (Known: React Router 4)
+   - Build tools (Known: Webpack + Yarn)
+   - TypeScript usage (Known: No, uses JavaScript)
+   - Service registration (Known: Nacos)
+   - Configuration management (Known: Nacos Config)
+
+   **✅ ASK in Section 6 Operations (Feature-specific, NOT in COMMON_KNOWLEDGE.md):**
+   - "导出功能使用哪个Excel处理库?" → Place in Section 6.6 (Export Template operation) as `<!-- clarification:start,id=c-6.6-1,type=tech_choice,... -->`
+   - "进度图使用哪个可视化组件?" → Place in Section 6.10 (Progress Graph operation) as `<!-- clarification:start,id=c-6.10-1,type=tech_choice,... -->`
+   - "此功能需要调用哪些外部API?" → Place in relevant operation's integration spec
+   - "此功能需要新增哪些数据库表?" → Place in Section 5 (Data Schema) as data schema question
+   - "前端需要新增哪些页面组件?" → Place in Section 6 (relevant operation) as UI components question
+   - "数据如何在Redis中缓存?" → Place in relevant operation as cache strategy question
+   - "使用哪个RabbitMQ交换机?" → Place in relevant operation as messaging question
+
+   **Application Scope:**
+   - **Section 2 (技术栈)**: MOST CRITICAL - Skip ALL questions, only pre-fill from COMMON_KNOWLEDGE.md
+   - **Section 5 (数据Schema映射)**: Skip database type questions, ask only schema structure details
+   - **Section 6 (操作详细规范)**: Skip generic framework/tool questions, place feature-specific tech choices here
+   - **All sections**: Filter out any generic tech stack questions everywhere
+
+   **Example - What to SKIP (Never generate these questions anywhere):**
+   ```markdown
+   ❌ "使用什么数据库?" → Already known (MySQL)
+   ❌ "前端使用React还是Vue?" → Already known (React 16.9.0)
+   ❌ "是否需要TypeScript?" → Already known (No, JavaScript only)
+   ❌ "API文档工具选择?" → Already known (Swagger 2.9.2)
+   ❌ "是否采用微服务架构?" → Already known (Yes, Spring Cloud)
+   ❌ "消息队列选型?" → Already known (RabbitMQ)
+   ❌ "缓存使用什么?" → Already known (Redis)
+   ❌ "文件存储方案?" → Already known (MinIO)
+   ```
+
+   **Example - What to ASK and WHERE (Feature-specific tech choices):**
+   ```markdown
+   ✅ In Section 6.6 (Export operation):
+   <!-- clarification:start,id=c-6.6-1,type=tech_choice,section=6.6,prd_ref=行205,priority=medium,status=pending -->
+   **Excel处理库选择:**
+   - [ ] Apache POI (Java标准库，功能完整)
+   - [ ] EasyExcel (阿里开源，适合大数据量)
+   - [ ] 其他: ___________
+   <!-- clarification:end -->
+
+   ✅ In Section 6.10 (Progress Graph operation):
+   <!-- clarification:start,id=c-6.10-1,type=tech_choice,section=6.10,prd_ref=行205,priority=medium,status=pending -->
+   **流程图可视化组件:**
+   - [ ] AntV G6 (蚂蚁金服图可视化引擎，与Ant Design配套)
+   - [ ] D3.js (自定义图形绘制，灵活性高)
+   - [ ] 自研组件
+   - [ ] 其他: ___________
+   <!-- clarification:end -->
+
+   ✅ In Section 5 (Data Schema):
+   "审批节点数据存储在哪张表?" (Feature-specific data structure)
+
+   ✅ In Section 6 operations:
+   "审批记录如何在Redis中缓存?" (Feature-specific cache strategy)
+   "审批通知通过哪个RabbitMQ交换机发送?" (Feature-specific messaging config)
+   ```
 
 7. **Generate and Validate `docs/PRD-Gen/clarification.md`** 🔴 CRITICAL: DO NOT SKIP VALIDATION
 
@@ -273,12 +386,83 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
    - Consolidate ALL questions in dedicated "待澄清问题汇总" section
    - Target sections: Section 5 (Data Schema), Section 6 (Operations), boundary condition tables
 
+   **7.6 HTML Comment Wrapper for Clarification Questions** 🆕
+
+   **ALL clarification questions MUST be wrapped with HTML comments for frontend parsing:**
+
+   **Format Specification:**
+   ```html
+   <!-- clarification:start,id={id},type={type},section={section_id},prd_ref={prd_ref},priority={priority},status=pending -->
+   **Question Topic:**
+   - [ ] Option 1 (explanation)
+   - [ ] Option 2 (explanation)
+   - [ ] 其他: ___________
+   <!-- clarification:end -->
+   ```
+
+   **ID Generation Rules:**
+   - Format: `c-{section}-{number}` or `c-{section}-op{op_id}-{number}`
+   - Examples:
+     * `c-2-1` (Section 2, Question 1)
+     * `c-5.2-3` (Section 5.2, Question 3)
+     * `c-6.1-op1-2` (Section 6.1, Operation 1, Question 2)
+   - Must be unique within document
+   - Sequential numbering within each section
+
+   **Type Classification:**
+   - `tech_choice`: Framework/tool selection, technology decisions
+   - `data_schema`: Data structure, field definitions, data types
+   - `business_logic`: Business rules, workflows, process logic
+   - `ui_ux`: Interface design, interaction patterns, visual elements
+   - `boundary`: Limits, constraints, thresholds, capacity
+   - `integration`: External systems, APIs, third-party services
+
+   **Priority Levels:**
+   - `high`: Blocking implementation, must be answered first
+   - `medium`: Important but not blocking
+   - `low`: Nice to have, can be deferred
+
+   **Complete Example:**
+   ```markdown
+   <!-- clarification:start,id=c-5.2-1,type=data_schema,section=5.2,prd_ref=行217,priority=high,status=pending -->
+   **审批人员配置存储格式:**
+   - [ ] 使用 JSON 类型 (MySQL 5.7+)
+   - [ ] 使用 TEXT 类型存储 JSON 字符串
+   - [ ] 其他: ___________
+   <!-- clarification:end -->
+
+   <!-- clarification:start,id=c-5.2-2,type=business_logic,section=5.2,prd_ref=行217,priority=high,status=pending -->
+   **或签逻辑确认:**
+   - [ ] 或签为true时任意一人通过即可，为false时所有人都需通过
+   - [ ] 采用其他规则: ___________
+   <!-- clarification:end -->
+
+   <!-- clarification:start,id=c-5.2-3,type=boundary,section=5.2,prd_ref=需补充,priority=medium,status=pending -->
+   **审批层级限制:**
+   - 最多支持 _______ 个审批层级
+   - 每层最多 _______ 个审批人
+   <!-- clarification:end -->
+   ```
+
+   **Wrapping Rules:**
+   1. **All questions in Rule 1-7 must be wrapped** (checkboxes, fill-in-the-blank, etc.)
+   2. **Wrap immediately around the question block** (from topic title to last option)
+   3. **Do not wrap table headers or PRD location notes** (only the questions)
+   4. **Each question gets its own wrapper** (no grouping multiple questions in one wrapper)
+   5. **Ensure proper nesting** (no overlapping wrappers)
+
+   **Application Order:**
+   - First: Apply tech stack filtering (Step 6.5)
+   - Second: Apply structured formatting (Rules 1-7)
+   - Third: Apply HTML wrappers to all structured questions
+   - Fourth: Validate format with Python script
+
    **Part B: IMMEDIATELY Run Validation (MANDATORY - DO NOT SKIP)**
    🚨 **STOP! Before proceeding to Step 8, you MUST run validation:**
 
    Run this command RIGHT AFTER generating clarification.md:
    ```bash
-   cd docs/PRD-Gen && python generate_clarification_index.py
+   cd .claude/script && python generate_clarification_index.py
    ```
 
     This will:

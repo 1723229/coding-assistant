@@ -212,14 +212,14 @@
 - 检查字段顺序是否符合模板
 
 **步骤8: 生成METADATA.json（必须执行）**
-- **必须**使用 `.claude/agents/validate_feature_tree.py` 生成METADATA.json
+- **必须**使用 `.claude/script/validate_feature_tree.py` 生成METADATA.json
 - 该工具会自动验证FEATURE_TREE.md的完整性和格式
 - 如果验证失败，**必须**修正FEATURE_TREE.md中的错误
 - 验证通过后才会生成METADATA.json
 
 **生成命令**:
 ```bash
-cd .claude/agents
+cd .claude/script
 python validate_feature_tree.py -i ../../docs/PRD-Gen/FEATURE_TREE.md
 ```
 
@@ -331,7 +331,7 @@ EOF
 - 确保修改后的内容符合格式规范
 
 **步骤7: 生成METADATA.json（必须执行）**
-- **必须**使用 `.claude/agents/validate_feature_tree.py` 重新生成METADATA.json
+- **必须**使用 `.claude/script/validate_feature_tree.py` 重新生成METADATA.json
 - 验证修改后的FEATURE_TREE.md是否符合格式要求
 - 如果验证失败，修正错误后重新运行
 
@@ -518,7 +518,7 @@ EOF
 
 ### METADATA.json 生成
 
-**重要**: METADATA.json **不应该手动编写**，必须通过 `.claude/agents/validate_feature_tree.py` 自动生成。
+**重要**: METADATA.json **不应该手动编写**，必须通过 `.claude/script/validate_feature_tree.py` 自动生成。
 
 该工具会：
 1. 读取并解析 FEATURE_TREE.md
@@ -528,7 +528,7 @@ EOF
 
 **生成方法**:
 ```bash
-cd .claude/agents
+cd .claude/script
 python validate_feature_tree.py -i ../../docs/PRD-Gen/FEATURE_TREE.md
 ```
 

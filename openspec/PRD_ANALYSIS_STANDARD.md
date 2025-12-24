@@ -113,7 +113,7 @@ After generating `clarification.md`, the `/analyze-prd` command MUST:
 
 1. **Run validation tool:**
    ```bash
-   cd docs/PRD-Gen && python generate_clarification_index.py
+   cd .claude/script && python generate_clarification_index.py
    ```
 
 2. **Generate two files:**
