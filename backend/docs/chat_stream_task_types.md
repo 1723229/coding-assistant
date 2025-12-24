@@ -80,8 +80,15 @@ task_type = "confirm-prd"
 | `--prd` | 原始 PRD 文件绝对路径 | 是 |
 
 **示例**:
+
+```bash
+cp FEATURE_TREE.md  /{user_home}/workspace/{session_id}
+cp prd.md  /{user_home}/workspace/{session_id}
+cp PRD_OVERVIEW.md  /{user_home}/workspace/{session_id}
+```
+
 ```python
-prompt = '--module "D1组建团队" --feature-tree "/Users/john/workspace/abc123/FEATURE_TREE.md" --prd "/Users/john/workspace/abc123/prd.md"'
+prompt = '--module "D1组建团队" --feature-tree "FEATURE_TREE.md" --prd "prd.md"'
 session_id = "abc123"
 task_type = "analyze-prd"
 ```
