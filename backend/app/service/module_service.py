@@ -2260,6 +2260,7 @@ class ModuleService:
             yield f"data: {json.dumps({'type': 'step', 'step': 'copy_files', 'status': 'progress', 'message': '复制PRD文件到新workspace...', 'progress': 22}, ensure_ascii=False)}\n\n"
 
             import shutil
+            import stat
             new_workspace_dir = Path.home() / "workspace" / session_id
             new_workspace_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2267,19 +2268,25 @@ class ModuleService:
                 # 复制 FEATURE_TREE.md
                 new_feature_tree_path = new_workspace_dir / "FEATURE_TREE.md"
                 shutil.copy2(feature_tree_path, new_feature_tree_path)
-                logger.info(f"Copied FEATURE_TREE.md to {new_feature_tree_path}")
+                # 添加可读可写权限
+                os.chmod(new_feature_tree_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH)
+                logger.info(f"Copied FEATURE_TREE.md to {new_feature_tree_path} with read/write permissions")
 
                 # 复制 prd.md
                 new_prd_path = new_workspace_dir / "prd.md"
                 shutil.copy2(prd_file_path, new_prd_path)
-                logger.info(f"Copied prd.md to {new_prd_path}")
+                # 添加可读可写权限
+                os.chmod(new_prd_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH)
+                logger.info(f"Copied prd.md to {new_prd_path} with read/write permissions")
 
                 # 复制 PRD_OVERVIEW.md（如果存在）
                 prd_overview_path = prd_gen_dir / "PRD_OVERVIEW.md"
                 if prd_overview_path.exists():
                     new_prd_overview_path = new_workspace_dir / "PRD_OVERVIEW.md"
                     shutil.copy2(prd_overview_path, new_prd_overview_path)
-                    logger.info(f"Copied PRD_OVERVIEW.md to {new_prd_overview_path}")
+                    # 添加可读可写权限
+                    os.chmod(new_prd_overview_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH)
+                    logger.info(f"Copied PRD_OVERVIEW.md to {new_prd_overview_path} with read/write permissions")
                 else:
                     logger.warning(f"PRD_OVERVIEW.md not found in {prd_workspace_dir}, skipping")
 
