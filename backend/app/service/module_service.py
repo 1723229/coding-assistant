@@ -2275,7 +2275,7 @@ class ModuleService:
                 logger.info(f"Copied prd.md to {new_prd_path}")
 
                 # 复制 PRD_OVERVIEW.md（如果存在）
-                prd_overview_path = prd_workspace_dir / "PRD_OVERVIEW.md"
+                prd_overview_path = prd_gen_dir / "PRD_OVERVIEW.md"
                 if prd_overview_path.exists():
                     new_prd_overview_path = new_workspace_dir / "PRD_OVERVIEW.md"
                     shutil.copy2(prd_overview_path, new_prd_overview_path)
