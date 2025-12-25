@@ -85,18 +85,38 @@ class ModuleService:
         """
         检查容器数量是否达到阈值
 
+        通过 Docker 命令查询当前服务器上运行的 coding-assistant 容器数量
+
         Returns:
             (是否可以创建, 错误消息)
         """
         try:
-            running_count = await self.version_repo.count_running_containers()
+            import subprocess
+            from app.core.executor.constants import CONTAINER_OWNER
+
+            # 使用 Docker 命令查询运行中的容器数量
+            cmd = [
+                "docker", "ps",
+                "--filter", f"label=owner={CONTAINER_OWNER}",
+                "--format", "{{.Names}}",
+            ]
+
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            # 计算运行中的容器数量（每行一个容器名称）
+            running_containers = [line for line in result.stdout.strip().split('\n') if line]
+            running_count = len(running_containers)
+
             max_containers = ContainerConfig.MAX_RUNNING_CONTAINERS
 
             if running_count >= max_containers:
                 return False, f"已达到最大容器数量限制({max_containers})，当前运行中: {running_count}"
 
+            logger.info(f"Container limit check passed: {running_count}/{max_containers} containers running")
             return True, ""
 
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to execute docker command: {e.stderr}", exc_info=True)
+            return False, f"检查容器限制失败(Docker命令执行错误): {e.stderr}"
         except Exception as e:
             logger.error(f"Failed to check container limit: {e}", exc_info=True)
             return False, f"检查容器限制失败: {str(e)}"
