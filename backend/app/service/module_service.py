@@ -1307,7 +1307,6 @@ class ModuleService:
                     code=version_code,
                     module_id=module.id,
                     msg="[SpecCoding Auto Commit] - Code building",
-                    commit="pending",
                     status=VersionStatus.CODE_BUILDING.value
                 )
                 version = await self.version_repo.create_version(data=version_data, created_by=updated_by)
@@ -1316,10 +1315,13 @@ class ModuleService:
 
             yield f"data: {json.dumps({'type': 'step', 'step': 'code_build', 'status': 'success', 'message': '开始生成代码', 'progress': 30}, ensure_ascii=False)}\n\n"
             # 步骤3: 生成代码
+            if not module.spec_content:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'spec_content内容为空'}, ensure_ascii=False)}\n\n"
+                return
             message_queue = asyncio.Queue()
             try:
                 task = asyncio.create_task(generate_code_from_spec(
-                    spec_content=module.require_content,
+                    spec_content=module.spec_content,
                     workspace_path=workspace_path,
                     session_id=session_id,
                     module_code=module.code,

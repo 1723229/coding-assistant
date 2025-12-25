@@ -44,8 +44,8 @@ github:
 
 # Project Configuration (Default values for new projects)
 project:
-  default_codebase: "https://ai:ai-12345678@rdgit.hipermatic.com/matrix/ai-mes.git"  # Default Git repository URL for new projects
-  default_token: "NDvyanPogS4L1LXqPzWd"      # Default Git token for new projects
+  default_codebase: "https://github.com/michi-vibe/h-mes-sample.git"  # Default Git repository URL for new projects
+  default_token: "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"      # Default Git token for new projects
 
 # Workspace Configuration
 workspace:
