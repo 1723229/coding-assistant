@@ -49,7 +49,7 @@ project:
 
 # Workspace Configuration
 workspace:
-  base_path: "./workspaces"
+  base_path: "/data/workspaces"
 
 # Executor Configuration (Sandbox Containers)
 # All task execution happens in isolated Docker containers
