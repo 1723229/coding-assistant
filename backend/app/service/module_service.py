@@ -17,7 +17,7 @@ from fastapi import Query, UploadFile
 from app.api.chat_router import module_repo
 from app.config.logging_config import log_print
 from app.config import get_settings
-from app.config.settings import FrameworkDatabaseConfig
+from app.config.settings import FrameworkDatabaseConfig, ProjectConfig
 from app.utils.model.response_model import BaseResponse, ListResponse
 from app.db.repository import ModuleRepository, ProjectRepository, VersionRepository, SessionRepository, \
     MessageRepository
@@ -1256,16 +1256,12 @@ class ModuleService:
 
             yield f"data: {json.dumps({'type': 'step', 'step': 'verify_workspace', 'status': 'success', 'message': '工作空间验证成功', 'progress': 20}, ensure_ascii=False)}\n\n"
 
-            # 步骤2.5: 检查容器限制并创建/更新 Version
-            yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'progress', 'message': '检查容器限制...', 'progress': 22}, ensure_ascii=False)}\n\n"
 
-            # 检查容器数量
-            can_create, error_msg = await self._check_container_limit()
-            if not can_create:
-                yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+            # 检查容器是否存在
+            if not module.container_id:
+                yield f"data: {json.dumps({'type': 'error', 'message': '容器不存在，，请先调生成spec'}, ensure_ascii=False)}\n\n"
                 return
 
-            yield f"data: {json.dumps({'type': 'step', 'step': 'check_container_limit', 'status': 'success', 'message': '容器限制检查通过', 'progress': 24}, ensure_ascii=False)}\n\n"
 
             # 查找或创建 Version 记录
             yield f"data: {json.dumps({'type': 'step', 'step': 'prepare_version', 'status': 'progress', 'message': '准备版本记录...', 'progress': 26}, ensure_ascii=False)}\n\n"
@@ -2062,6 +2058,8 @@ class ModuleService:
                     code=project_code,
                     name=project_name,
                     prd_session_id=session_id,
+                    codebase=ProjectConfig.DEFAULT_CODEBASE,
+                    token=ProjectConfig.DEFAULT_TOKEN,
                 )
 
                 project = await self.project_repo.create_project(data=project_data)
@@ -2325,7 +2323,6 @@ class ModuleService:
                 logger.info(f"Starting analyze-prd task: session_id={session_id}, module={module_name}")
 
                 # 流式处理 analyze-prd 任务
-                buffer = ""
                 async for chat_msg in self.agent_service.chat_stream(
                     prompt=prompt,
                     session_id=session_id,
@@ -2336,24 +2333,17 @@ class ModuleService:
 
                     # 根据消息类型调整进度展示
                     if chat_msg.type in ("text", "text_delta"):
-                        # 文本消息，累加到缓冲区，按 \n\n 分隔输出
-                        buffer += chat_msg.content
-                        while "\n\n" in buffer:
-                            line, buffer = buffer.split("\n\n", 1)
-                            yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 55}, ensure_ascii=False)}\n\n"
+                        # 文本消息，显示为 analyze_prd 进度（35-75%）
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': chat_msg.content[:100], 'progress': 55}, ensure_ascii=False)}\n\n"
                     elif chat_msg.type == "tool_use":
-                        # 工具调用，打印日志
+                        # 工具调用
                         tool_name = msg_dict.get('tool_name', 'unknown')
-                        logger.info(f"Tool use: {tool_name}")
+                        logger.info(f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'progress', 'message': f'正在执行: {tool_name}', 'progress': 65}, ensure_ascii=False)}")
                     elif chat_msg.type == "error":
                         yield f"data: {json.dumps({'type': 'error', 'message': f'PRD分析失败: {chat_msg.content}'}, ensure_ascii=False)}\n\n"
                         return
 
                     await asyncio.sleep(0.01)
-
-                # 最后 flush 剩余内容（即使没有 \n\n）
-                if buffer:
-                    yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': buffer, 'progress': 55}, ensure_ascii=False)}\n\n"
 
                 yield f"data: {json.dumps({'type': 'step', 'step': 'analyze_prd', 'status': 'success', 'message': 'PRD模块分析完成', 'progress': 75}, ensure_ascii=False)}\n\n"
 
