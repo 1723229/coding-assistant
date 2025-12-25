@@ -65,21 +65,6 @@ async def get_module_tree(
 
 
 @module_router.post(
-    "",
-    summary="创建新模块",
-    operation_id="create_module"
-)
-async def create_module(data: ModuleCreate):
-    """
-    创建新模块
-
-    - NODE 类型：只创建记录，URL 与子节点共享
-    - POINT 类型：创建 session，拉取代码到 workspace
-    """
-    return await module_service.create_module(data)
-
-
-@module_router.post(
     "/stream",
     summary="创建新模块（流式）",
     operation_id="create_module_stream"
