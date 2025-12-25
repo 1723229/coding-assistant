@@ -189,6 +189,19 @@ class WorkspaceConfig:
 
 
 # ============================================================================
+# Project Configuration
+# ============================================================================
+
+class ProjectConfig:
+    """Project configuration for default values"""
+
+    _project_config = _config.get("project", {})
+
+    DEFAULT_CODEBASE = _project_config.get("default_codebase", "")
+    DEFAULT_TOKEN = _project_config.get("default_token", "")
+
+
+# ============================================================================
 # Docker Configuration (Legacy - for workspace containers)
 # ============================================================================
 
