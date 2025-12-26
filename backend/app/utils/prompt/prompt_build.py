@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any, Coroutine
 
 from app.core.sandbox_service import session_manager, MessageType
 from app.core.openspec_reader import get_proposal_content_by_id
@@ -17,7 +17,8 @@ async def generate_code_from_spec(
         module_url: str,
         task_type: str,
         message_queue: Queue
-) -> Tuple[Optional[str], Optional[list[str]], Optional[list[str]]]:
+) -> tuple[str | None, list[Any], list[Any], Any] | tuple[str | None, list[Any], list[Any], None] | tuple[
+    str | None, list[Any], list[Any], str]:
     """
     使用 Claude 根据规格文档生成代码并commit
 
@@ -91,14 +92,14 @@ async def generate_code_from_spec(
         has_error = any(msg.type == MessageType.ERROR.value for msg in all_messages)
         if has_error:
             logger.error("Claude encountered errors during code generation")
-            return proposal_content, to_data, result
+            return proposal_content, to_data, result, msg.content
 
         logger.info("Code generation completed, now committing changes...")
-        return proposal_content, to_data, result
+        return proposal_content, to_data, result, None
 
     except Exception as e:
         logger.error(f"Failed to generate code from spec: {e}", exc_info=True)
-        return proposal_content, [], []
+        return proposal_content, [], [], f"Failed to generate code from spec: {e}"
 
 
 class PromptBuild:
