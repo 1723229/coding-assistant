@@ -562,7 +562,7 @@ class ModuleService:
                                 line, buffer = buffer.split("\n\n", 1)
                                 # 推送这一整行
                                 yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 85}, ensure_ascii=False)}\n\n"
-                        spec_content, msg_list, result = await task
+                        spec_content, msg_list, result, has_error = await task
                         if spec_content:
                             yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'spec_content': spec_content, 'progress': 85})}\n\n"
 
@@ -977,7 +977,10 @@ class ModuleService:
                         line, buffer = buffer.split("\n\n", 1)
                         # 推送这一整行
                         yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 60}, ensure_ascii=False)}\n\n"
-                spec_content, msg_list, result = await task
+                spec_content, msg_list, result, error_info = await task
+                if error_info:
+                    yield f"data: {json.dumps({'type': 'error', 'message': error_info, 'progress': 100}, ensure_ascii=False)}\n\n"
+                    return
                 if spec_content:
                     yield f"data: {json.dumps({'type': 'step', 'step': 'update_spec', 'status': 'success', 'message': 'spec更新成功', 'spec_content': spec_content, 'progress': 80}, ensure_ascii=False)}\n\n"
                 else:
@@ -1126,7 +1129,10 @@ class ModuleService:
                         line, buffer = buffer.split("\n\n", 1)
                         # 推送这一整行
                         yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 60}, ensure_ascii=False)}\n\n"
-                spec_content, msg_list, result = await task
+                spec_content, msg_list, result, error_info = await task
+                if error_info:
+                    yield f"data: {json.dumps({'type': 'error', 'message': error_info, 'progress': 100}, ensure_ascii=False)}\n\n"
+                    return
                 # 保存会话
                 try:
                     if msg_list:
@@ -1178,7 +1184,11 @@ class ModuleService:
                     # Commit
                     commit = repo.index.commit(commit_message)
                     commit_id = commit.hexsha[:12]  # 使用前12位
-                    repo.git.push()
+                    # 获取当前分支名
+                    current_branch = repo.active_branch.name
+
+                    # 推送并设置上游（等价于 git push -u origin <branch>）
+                    repo.git.push("--set-upstream", "origin", current_branch)
 
                     logger.info(f"Code committed successfully: {commit_id}")
                     yield f"data: {json.dumps({'type': 'step', 'step': 'commit', 'status': 'success', 'message': f'commit完成,id: {commit_id}', 'progress': 60}, ensure_ascii=False)}\n\n"
@@ -2462,8 +2472,10 @@ class ModuleService:
                             line, buffer = buffer.split("\n\n", 1)
                             yield f"data: {json.dumps({'type': 'step', 'step': 'ai_think', 'status': 'success', 'message': 'ai思考...', 'ai_message': line, 'progress': 85}, ensure_ascii=False)}\n\n"
 
-                    spec_content, msg_list, result = await task
-
+                    spec_content, msg_list, result, error_info = await task
+                    if error_info:
+                        yield f"data: {json.dumps({'type': 'error', 'message': error_info, 'progress': 100}, ensure_ascii=False)}\n\n"
+                        return
                     if spec_content:
                         yield f"data: {json.dumps({'type': 'step', 'step': 'generate_spec', 'status': 'success', 'message': 'Spec文档生成成功', 'spec_content': spec_content, 'progress': 90}, ensure_ascii=False)}\n\n"
 
