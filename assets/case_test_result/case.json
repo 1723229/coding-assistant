@@ -1,0 +1,96 @@
+{
+  "status": "error",
+  "groups": [
+    {
+      "nodeId": "140491222585552",
+      "status": "completed",
+      "objective": "在设置窗口左侧导航栏中点击“System”（系统），进入系统设置页面。",
+      "error": null,
+      "steps": [
+        {
+          "stepId": "140491222433712",
+          "status": "completed",
+          "stepDescription": "点击左侧导航栏上的“System”选项。",
+          "actionTime": 1766577085280,
+          "error": null,
+          "screenshot": "static/0.png"
+        }
+      ]
+    },
+    {
+      "nodeId": "140491222589680",
+      "status": "completed",
+      "objective": "在系统设置右侧列表中找到并点击“Display”（屏幕），进入显示设置页面。",
+      "error": null,
+      "steps": [
+        {
+          "stepId": "140491228612032",
+          "status": "completed",
+          "stepDescription": "在系统设置列表中点击名为“Display”的项目",
+          "actionTime": 1766577129505,
+          "error": null,
+          "screenshot": "static/1.png"
+        }
+      ]
+    },
+    {
+      "nodeId": "140491235332880",
+      "status": "completed",
+      "objective": "在显示设置页面中找到“Scale”（缩放）选项。如果下拉菜单中没有75%的选项，请点击“Scale”这一行右侧的箭头进入“Custom scaling”（自定义缩放）设置页面。",
+      "error": null,
+      "steps": [
+        {
+          "stepId": "140491222537600",
+          "status": "completed",
+          "stepDescription": "点击“Scale”右侧显示当前缩放比例（125%）的下拉按钮。",
+          "actionTime": 1766577162601,
+          "error": null,
+          "screenshot": "static/2.png"
+        },
+        {
+          "stepId": "140491222594096",
+          "status": "completed",
+          "stepDescription": "由于下拉菜单中没有75%，需要点击Scale选项最右侧的箭头进入二级详细设置页面。",
+          "actionTime": 1766577239737,
+          "error": null,
+          "screenshot": "static/3.png"
+        },
+        {
+          "stepId": "140491236582720",
+          "status": "completed",
+          "stepDescription": "由于之前的操作未能进入Custom scaling页面，我将再次尝试点击Scale项目右端的箭头图标。",
+          "actionTime": 1766577260970,
+          "error": null,
+          "screenshot": "static/4.png"
+        }
+      ]
+    },
+    {
+      "nodeId": "140491222904864",
+      "status": "error",
+      "objective": "在自定义缩放输入框中输入“75”，然后点击右侧的打勾图标确认（或应用）。若系统提示需要注销才能生效，请确认设置已成功输入到框中并点击了应用按钮。\n收集: 设置结果：缩放百分比已成功输入并应用为75%)",
+      "error": "系统不支持设置为75%。自定义缩放比例必须在100%到500%之间，因此无法应用您要求的设置。",
+      "steps": [
+        {
+          "stepId": "140494151756032",
+          "status": "completed",
+          "stepDescription": "在自定义缩放文本框中输入“75”。",
+          "actionTime": 1766577291407,
+          "error": null,
+          "screenshot": "static/5.png"
+        },
+        {
+          "stepId": "140491222908848",
+          "status": "completed",
+          "stepDescription": "点击输入框右侧的打勾（应用）图标。",
+          "actionTime": 1766577339081,
+          "error": null,
+          "screenshot": "static/6.png"
+        }
+      ]
+    }
+  ],
+  "error": "系统不支持设置为75%。自定义缩放比例必须在100%到500%之间，因此无法应用您要求的设置。",
+  "finalScreenshot": "static/7.png",
+  "caseName": "新建流程图"
+}
