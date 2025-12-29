@@ -44,7 +44,7 @@ async def generate_code_from_spec(
         elif task_type == "preview":
             prompt= f"<User's review>\n {spec_content} \n - 强调：不允许反问用户，不需要澄清，不允许让用户确认，直接开始执行"
         else:
-            prompt = spec_content
+            prompt = f"{spec_content} \n - 强调：不允许反问用户，不需要澄清，不允许让用户确认，直接开始执行"
 
         logger.info(f"Generating code from spec for task: {task_type} \n prompt : {prompt}")
 
