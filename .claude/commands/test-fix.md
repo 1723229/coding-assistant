@@ -65,13 +65,16 @@ personas: [root-cause-analyst]
    - Use Playwright MCP to perform page-level testing
    - Execute FULL UI workflow validation (no shortcuts)
    - Reproduce EXACT test scenario from original failure
-   - Capture screenshot and save as `validation_pass.png`
+   - Capture screenshot and save as `fix/validation_<case-name>_<timestamp>.png`
+     - Must include case name for uniqueness
+     - Save in `fix/` directory for organization
+     - Example: `fix/validation_问题类型管理_20251229_143052.png`
    - Verify ALL steps pass successfully
    - **FAILURE TO VALIDATE = FIX NOT COMPLETE**
 
 7. **Report**: Summary of fixes applied and validation results
    - Document fix implementation
-   - Provide screenshot proof (`validation_pass.png`)
+   - Provide screenshot proof (`fix/validation_<case-name>_<timestamp>.png`)
    - Confirm 100% completion of all steps
 
 ## Key Behaviors
@@ -102,7 +105,10 @@ personas: [root-cause-analyst]
 **Mandatory Validation (100% REQUIRED - NO SHORTCUTS):**
 - ✅ **Playwright page-level testing after EVERY fix**
 - ✅ **Full UI workflow execution (reproduce exact scenario)**
-- ✅ **Screenshot capture saved as `validation_pass.png`**
+- ✅ **Screenshot capture saved as `fix/validation_<case-name>_<timestamp>.png`**
+  - Include case name for uniqueness (avoid overwriting)
+  - Save in `fix/` directory for organization
+  - Use timestamp for additional uniqueness
 - ✅ **Visual regression verification**
 - ✅ **ALL test steps must pass - no partial success**
 - ❌ **Fix is INCOMPLETE without Playwright validation proof**
@@ -111,7 +117,7 @@ personas: [root-cause-analyst]
 1. Code changes applied ✅
 2. Service restarted successfully ✅
 3. Playwright validation passes ✅
-4. Screenshot proof saved (`validation_pass.png`) ✅
+4. Screenshot proof saved (`fix/validation_<case-name>_<timestamp>.png`) ✅
 5. NO steps skipped ✅
 
 ## MCP Integration
@@ -233,18 +239,18 @@ Output:
    ✅ Found: ./scripts/restart.sh
    ⚡ Executing: bash ./scripts/restart.sh
    ✅ Service restarted successfully
-   ✅ Verified service running on port xxxx
+   ✅ Verified service running on port 8000
 
 🎭 Validating with Playwright... (MANDATORY - NO EXCEPTIONS)
    🌐 Launching browser automation
    📸 Executing FULL UI test workflow (exact reproduction)
-   ✅ Page loaded: http://localhost:xxxx/login
+   ✅ Page loaded: http://localhost:8000/login
    ✅ Step 1: Enter username - PASS
    ✅ Step 2: Enter short password - PASS (validation triggered)
    ✅ Step 3: Validation error shown - PASS
    ✅ Step 4: Enter valid password - PASS
    ✅ Step 5: Login flow completed - PASS
-   📸 Screenshot captured and saved: validation_pass.png
+   📸 Screenshot captured and saved: fix/validation_login_test_20251229_143052.png
    ✅ Visual verification: ALL steps passed
 
 📊 Summary:
@@ -252,7 +258,7 @@ Output:
    - Bugs fixed: 1/1 (100% complete)
    - Service restarted: ✅ SUCCESS
    - Playwright validation: ✅ PASS (ALL steps)
-   - Screenshot proof: ✅ validation_pass.png saved
+   - Screenshot proof: ✅ fix/validation_login_test_20251229_143052.png saved
    - Steps completed: 7/7 (100% - NO steps skipped)
    - Fix status: ✅ COMPLETE (fully validated)
    - Time: 18.7s
@@ -284,7 +290,10 @@ Output:
   - Browser automation with real user interactions
   - **Reproduce EXACT test scenario from failure**
   - **Visual screenshot comparison**
-  - **Save screenshot as `validation_pass.png`**
+  - **Save screenshot as `fix/validation_<case-name>_<timestamp>.png`**
+    - Include case name for uniqueness
+    - Save in `fix/` directory
+    - Example: `fix/validation_问题类型管理_20251229_143052.png`
   - **ALL steps must pass - no partial success**
 - ✅ Re-run failed test case with Playwright
 - ✅ Run related test suite
@@ -297,7 +306,7 @@ Output:
 4. ✅ Service restarted successfully
 5. ✅ Playwright validation executed
 6. ✅ ALL test steps passed
-7. ✅ Screenshot proof saved (`validation_pass.png`)
+7. ✅ Screenshot proof saved (`fix/validation_<case-name>_<timestamp>.png`)
 8. ✅ No steps skipped or ignored
 
 **Failure Conditions (Fix is INCOMPLETE if ANY occurs):**
@@ -327,8 +336,11 @@ Output:
 2. **Fix COMPLETELY** - No partial implementations or workarounds
 3. **Restart ALWAYS** - Service must be restarted before validation
 4. **Validate with Playwright** - Mandatory page-level testing, exact scenario reproduction
-5. **Prove with Screenshot** - Must save `validation_pass.png` as proof
+5. **Prove with Screenshot** - Must save `fix/validation_<case-name>_<timestamp>.png` as proof
+   - Include case name for uniqueness
+   - Save in `fix/` directory for organization
 6. **Pass ALL Steps** - Every step must succeed, no partial success accepted
 
 **Fix with 100% confidence through complete validation, or don't fix at all.**
 **Validation is NOT optional - it is the DEFINITION of completion.**
+
