@@ -135,23 +135,7 @@ fix/{fix-id}/
 }
 ```
 
-### Phase 3: Classify
-
-**Auto-Fixable (Implementation Bugs):**
-- Logic errors
-- Incorrect UI selectors
-- Missing validation
-- Race conditions
-- Data transformation errors
-- State management issues
-
-**Not Fixable (Report Only):**
-- Hardware/OS limitations
-- API restrictions
-- Third-party service limitations
-- Business rule violations
-
-### Phase 4: Fix
+### Phase 3: Fix
 
 1. Implement targeted fix for root cause
 2. Apply defensive coding practices
@@ -164,7 +148,7 @@ fix/{fix-id}/
 - [ ] Appropriate error handling
 - [ ] No hardcoded workarounds
 
-### Phase 5: Restart Service
+### Phase 4: Restart Service
 
 **Detection Priority:**
 1. CLAUDE.md instructions
@@ -182,30 +166,35 @@ fix/{fix-id}/
 3. Wait for service health check
 4. Retry up to 3 times on failure
 
-### Phase 6: Validate with Playwright (MANDATORY)
+### Phase 5: Validate with Playwright (MANDATORY)
 
 > ⚠️ **CRITICAL**: This phase is NOT optional. Fix is INCOMPLETE without Playwright validation.
 
 **Base URL Configuration**:
-- Always use `127.0.0.1:{port}` (default port: `3000`)
-- **IMPORTANT**: Preserve full path from original test URL
-- Example: `http://172.27.1.44:20001/page1` → `http://127.0.0.1:3000/page1`
+- **CRITICAL**: ALWAYS preserve the FULL path and query parameters from original test URL
+- Replace ONLY the host:port portion with `127.0.0.1:{port}` (default port: `3000`)
+- **Example**: `http://172.27.1.44:20001/module/feature?id=123` → `http://127.0.0.1:3000/module/feature?id=123`
+- **NEVER** navigate to `http://127.0.0.1:3000` alone - this triggers login and breaks validation
+- **Pattern**: Extract everything after port from original URL and append to new base URL
 
-**Required MCP Tools:**
-- `browser_navigate` - Navigate to URL
-- `browser_snapshot` - Get page accessibility tree
-- `browser_click` - Click elements
-- `browser_type` - Type into inputs
-- `browser_take_screenshot` - Capture proof
+**Validation Requirements:**
+- Use Playwright MCP tools to reproduce the exact test scenario
+- Navigate to the validation URL and interact with elements
+- Verify each step's expected outcome (element presence, text content, API responses)
+- Capture screenshot as validation proof
 
 **Steps:**
-1. Navigate to `http://127.0.0.1:3000{path}` (extract path from original test URL)
-2. Reproduce EXACT test scenario from `groups[].steps`
-3. Verify each step passes
-4. Capture screenshot: `fix/{fix-id}/validation_pass.png` or `validation_fail.png`
-5. Add `validation` results to fix_result.json
+1. **Extract full URL path**: Parse original test URL to get everything after `host:port` (path + query + hash)
+2. **Build validation URL**: `http://127.0.0.1:3000{full_path_with_query_and_hash}`
+   - Example: `http://172.27.1.44:20001/dashboard/users?tab=active#section2`
+   - Becomes: `http://127.0.0.1:3000/dashboard/users?tab=active#section2`
+3. **Navigate using Playwright**: `playwright_navigate` to the constructed URL
+4. **Reproduce EXACT test scenario** from `groups[].steps` using Playwright tools
+5. **Verify each step passes** - check for expected elements and states
+6. **Capture screenshot**: `playwright_screenshot` → `fix/{fix-id}/validation_pass.png` or `validation_fail.png`
+7. **Add validation results** to fix_result.json
 
-### Phase 7: Generate Reports
+### Phase 6: Generate Reports
 
 **Final fix_result.json requirements:**
 - All phases have final status (completed/failed)
@@ -285,7 +274,7 @@ fix/{fix-id}/
 - **Screenshot**: validation_pass.png
 ```
 
-### Phase 8: Verify Output (MANDATORY)
+### Phase 7: Verify Output (MANDATORY)
 
 **Required Files:**
 - [ ] `fix/{fix-id}/fix_result.json` - exists and valid JSON
