@@ -936,6 +936,16 @@ class ModuleService:
 
             yield f"data: {json.dumps({'type': 'step', 'step': 'verify_workspace', 'status': 'success', 'message': '工作空间验证成功', 'progress': 20}, ensure_ascii=False)}\n\n"
 
+            session_model = await self.session_repo.get_session_by_id(session_id=session_id)
+            if not session_model:
+                await self.session_repo.create_session(
+                    session_id=session_id,
+                    name=module.code + "-" + module.project_id,
+                    workspace_path=workspace_path,
+                    github_repo_url=settings.github_default_repo,
+                    github_branch=module.branch,
+                )
+
             await message_repo.create_message(
                 session_id=session_id,
                 role='user',
