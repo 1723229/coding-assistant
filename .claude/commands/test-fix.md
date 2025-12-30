@@ -1,6 +1,10 @@
 ---
 name: test-fix
-description: Automatically analyze and fix failed test cases with Playwright validation
+description: "Automatically fix failed test cases with guaranteed correctness"
+category: testing
+complexity: enhanced
+mcp-servers: [playwright]
+personas: [root-cause-analyst]
 ---
 
 # /test-fix
@@ -183,19 +187,19 @@ fix/{fix-id}/
 > ⚠️ **CRITICAL**: This phase is NOT optional. Fix is INCOMPLETE without Playwright validation.
 
 **Base URL Configuration**:
-- Default test URL: `http://127.0.0.1:3000` (localhost access)
-- Override via environment variable if needed
-- All Playwright operations use local IP address (127.0.0.1)
+- Always use `127.0.0.1:{port}` (default port: `3000`)
+- **IMPORTANT**: Preserve full path from original test URL
+- Example: `http://172.27.1.44:20001/page1` → `http://127.0.0.1:3000/page1`
 
 **Required MCP Tools:**
-- `browser_navigate` - Navigate to test URL (http://127.0.0.1:3000)
+- `browser_navigate` - Navigate to URL
 - `browser_snapshot` - Get page accessibility tree
 - `browser_click` - Click elements
 - `browser_type` - Type into inputs
 - `browser_take_screenshot` - Capture proof
 
 **Steps:**
-1. Navigate to test starting URL (http://127.0.0.1:3000 or configured URL)
+1. Navigate to `http://127.0.0.1:3000{path}` (extract path from original test URL)
 2. Reproduce EXACT test scenario from `groups[].steps`
 3. Verify each step passes
 4. Capture screenshot: `fix/{fix-id}/validation_pass.png` or `validation_fail.png`
@@ -453,7 +457,7 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 1. **Read EVERYTHING** - All test files, screenshots, source code
 2. **Fix COMPLETELY** - No partial implementations
 3. **Restart ALWAYS** - Service must restart before validation
-4. **Validate with Playwright** - MANDATORY, no exceptions, use http://127.0.0.1:3000
+4. **Validate with Playwright** - MANDATORY, no exceptions
 5. **Update fix_result.json** - EVERY phase transition must update the file
 6. **Recover on Failure** - Auto-retry transient errors
 7. **Prove with Artifacts** - Save all 3 output files
