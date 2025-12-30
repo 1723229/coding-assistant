@@ -1,346 +1,422 @@
 ---
 name: test-fix
-description: "Automatically fix failed test cases with guaranteed correctness"
-category: testing
-complexity: enhanced
-mcp-servers: [playwright]
-personas: [root-cause-analyst]
+description: Automatically analyze and fix failed test cases with Playwright validation
 ---
 
-# /test-fix - Automatic Test Failure Fix
+# /test-fix
 
-## Purpose
-**Core Mission**: Automatically analyze and fix failed test cases with guaranteed correctness through validation.
-
-## Triggers
-- Test case result files (JSON format with groups, steps, errors)
-- Failed test scenarios requiring immediate correction
-- UI/UX workflow failures with screenshots
-- Integration test failures
+Automatic test failure analysis and fix with mandatory Playwright validation.
 
 ## Usage
+
+```bash
+/test-fix <result-file> [fix-id]
 ```
-/test-fix <result-file>
+
+**Arguments:**
+- `result-file` (required): Path to test result JSON file
+- `fix-id` (optional): Unique fix session identifier (auto-generated from `caseName` if omitted)
+
+**Examples:**
+```bash
+/test-fix test/case_test_result/case.json
+/test-fix ./test-results/case.json login-fix-001
 ```
 
-## Auto-Fix Workflow
+---
 
-**CRITICAL REQUIREMENTS - NO SHORTCUTS ALLOWED:**
-- ✅ Read ALL related files (test cases, screenshots, source code)
-- ✅ Reproduce the complete failure workflow
-- ✅ Mandatory Playwright validation with screenshot proof
-- ✅ 100% completion required - NO skipping steps
-- ❌ NEVER skip, ignore, or partially complete any step
+## Input: Test Result JSON Structure
 
-**Step-by-Step Process:**
-
-1. **Parse & Read ALL Related Files** (MANDATORY):
-   - Load test result JSON completely
-   - Read ALL screenshots referenced in test results
-   - Read test case definition files
-   - Read reproduction workflow documentation
-   - Read all source files involved in the failure
-   - Extract complete failure context (no shortcuts)
-
-2. **Analyze**: Deep root cause analysis of failure patterns
-   - Analyze visual evidence from screenshots
-   - Trace failure through complete execution flow
-   - Document root cause with evidence
-
-3. **Diagnose**: Identify fixable bugs vs system constraints
-   - Distinguish implementation bugs from system limits
-   - Confirm bug is within fix scope
-
-4. **Fix**: Apply code changes to resolve issues
-   - Implement targeted fix for root cause
-   - No partial fixes - complete resolution only
-
-5. **Restart Service** (MANDATORY):
-   - Read project CLAUDE.md for service restart instructions
-   - Search for restart/stop/start scripts in project
-   - Execute appropriate restart command before testing
-   - Verify service is running before validation
-
-6. **Validate with Playwright** (MANDATORY - NO EXCEPTIONS):
-   - Use Playwright MCP to perform page-level testing
-   - Execute FULL UI workflow validation (no shortcuts)
-   - Reproduce EXACT test scenario from original failure
-   - Capture screenshot and save as `fix/validation_<case-name>_<timestamp>.png`
-     - Must include case name for uniqueness
-     - Save in `fix/` directory for organization
-     - Example: `fix/validation_问题类型管理_20251229_143052.png`
-   - Verify ALL steps pass successfully
-   - **FAILURE TO VALIDATE = FIX NOT COMPLETE**
-
-7. **Report**: Summary of fixes applied and validation results
-   - Document fix implementation
-   - Provide screenshot proof (`fix/validation_<case-name>_<timestamp>.png`)
-   - Confirm 100% completion of all steps
-
-## Key Behaviors
-
-**Mandatory File Reading (NO EXCEPTIONS):**
-- ✅ Read complete test result JSON with all nested data
-- ✅ Read EVERY screenshot file referenced in test results
-- ✅ Read ALL source code files involved in failure path
-- ✅ Read test case definitions and workflow documentation
-- ✅ Read project configuration files (CLAUDE.md, package.json, etc.)
-
-**Analysis Requirements:**
-- Parse hierarchical test results (groups → objectives → steps)
-- Analyze Chinese/English error messages
-- **Visual screenshot analysis for UI state understanding (MANDATORY)**
-- Trace complete execution flow from screenshots
-- Distinguish fixable bugs from system constraints
-
-**Fix Implementation:**
-- Apply fixes ONLY for implementation bugs
-- **No partial fixes - complete resolution required**
-- **Auto-detect service restart method**:
-  - Check CLAUDE.md for restart instructions
-  - Search for start.sh/stop.sh/restart.sh scripts
-  - Use package.json scripts (npm start/restart)
-  - Execute restart before validation
-
-**Mandatory Validation (100% REQUIRED - NO SHORTCUTS):**
-- ✅ **Playwright page-level testing after EVERY fix**
-- ✅ **Full UI workflow execution (reproduce exact scenario)**
-- ✅ **Screenshot capture saved as `fix/validation_<case-name>_<timestamp>.png`**
-  - Include case name for uniqueness (avoid overwriting)
-  - Save in `fix/` directory for organization
-  - Use timestamp for additional uniqueness
-- ✅ **Visual regression verification**
-- ✅ **ALL test steps must pass - no partial success**
-- ❌ **Fix is INCOMPLETE without Playwright validation proof**
-
-**Guarantee correctness: Fix is ONLY complete when:**
-1. Code changes applied ✅
-2. Service restarted successfully ✅
-3. Playwright validation passes ✅
-4. Screenshot proof saved (`fix/validation_<case-name>_<timestamp>.png`) ✅
-5. NO steps skipped ✅
-
-## MCP Integration
-- **Playwright MCP**: Re-execute test scenarios for validation
-- **Root Cause Analyst**: Systematic bug investigation
-
-## Tool Coordination
-- **Read**: Load test result JSON, screenshots, and source files
-- **Grep**: Search codebase for bug locations
-- **Edit**: Apply targeted code fixes
-- **Bash**: Re-run tests for validation
-- **TodoWrite**: Track fix progress
-
-## Test Result Structure Expected
+The test result file follows this schema:
 
 ```json
 {
   "status": "error" | "completed",
+  "caseName": "string",
+  "error": "string | null",
+  "finalScreenshot": "path/to/image.png",
   "groups": [
     {
       "nodeId": "string",
       "status": "completed" | "error",
-      "objective": "string (Chinese/English)",
+      "objective": "string",
       "error": "string | null",
       "steps": [
         {
           "stepId": "string",
           "status": "completed" | "error",
           "stepDescription": "string",
-          "actionTime": "timestamp",
+          "actionTime": 1766738700722,
           "error": "string | null",
-          "screenshot": "path/to/image.png"
+          "screenshot": "static/0.png"
         }
       ]
     }
-  ],
-  "error": "string | null",
-  "finalScreenshot": "path/to/image.png",
-  "caseName": "string"
+  ]
 }
 ```
 
-## Fix Categories
+**Field Descriptions:**
+| Field | Description |
+|-------|-------------|
+| `status` | Overall test result: `error` (failed) or `completed` (passed) |
+| `caseName` | Test case name, used as default `fix-id` |
+| `error` | Top-level error message (null if passed) |
+| `finalScreenshot` | Path to final state screenshot |
+| `groups` | Ordered list of test groups (objectives) |
+| `groups[].objective` | What this group aims to accomplish |
+| `groups[].steps` | Individual actions within the group |
+| `groups[].steps[].screenshot` | Screenshot after this step |
 
-### 1. Implementation Bugs (Auto-Fixable)
-- Logic errors in code
+---
+
+## Output: Fix Artifacts
+
+All artifacts are written to `fix/{fix-id}/`:
+
+```
+fix/{fix-id}/
+├── fix_result.json      # Complete fix metadata
+├── validation_pass.png  # Screenshot on success
+├── validation_fail.png  # Screenshot on failure
+└── fix_note.md          # Human-readable report
+```
+
+---
+
+## Workflow
+
+### Phase 0: Initialize
+
+1. Generate or use provided `fix-id`
+2. Create output directory: `fix/{fix-id}/`
+3. Initialize `fix_result.json` with status `in_progress`
+
+### Phase 1: Parse
+
+**Required Actions:**
+- Load test result JSON completely
+- Read ALL referenced screenshots
+- Read source files in failure path
+- Read configuration files (CLAUDE.md, package.json)
+
+**Checklist:**
+- [ ] Test result JSON loaded
+- [ ] ALL screenshots from `groups[].steps[].screenshot` read
+- [ ] `finalScreenshot` read
+- [ ] Source code files identified and read
+
+### Phase 2: Analyze
+
+1. Analyze visual evidence from screenshots
+2. Trace failure through execution flow
+3. Identify root cause with evidence
+4. Document: file, line, type, description
+
+**Analysis Output:**
+```json
+{
+  "rootCause": {
+    "file": "path/to/file.py",
+    "line": 145,
+    "type": "missing_validation | logic_error | selector_error | race_condition",
+    "description": "Clear explanation of the bug"
+  }
+}
+```
+
+### Phase 3: Classify
+
+**Auto-Fixable (Implementation Bugs):**
+- Logic errors
 - Incorrect UI selectors
 - Missing validation
 - Race conditions
-- Incorrect error handling
+- Data transformation errors
+- State management issues
 
-### 2. System Constraints (Skip - Report Only)
+**Not Fixable (Report Only):**
 - Hardware/OS limitations
 - API restrictions
 - Third-party service limitations
 - Business rule violations
 
-## Auto-Fix Patterns
+### Phase 4: Fix
+
+1. Implement targeted fix for root cause
+2. Apply defensive coding practices
+3. Follow existing code patterns
+
+**Quality Checklist:**
+- [ ] Addresses root cause (not symptoms)
+- [ ] No side effects
+- [ ] Appropriate error handling
+- [ ] No hardcoded workarounds
+
+### Phase 5: Restart Service
+
+**Detection Priority:**
+1. CLAUDE.md instructions
+2. Shell scripts: `restart.sh`, `start.sh`, `stop.sh`
+3. npm scripts in `package.json`
+
+**Search Locations:**
+```
+./restart.sh, ./start.sh, ./stop.sh, ./scripts/, ./bin/, ./frontend/, ./backend/, package.json
+```
+
+**Steps:**
+1. Detect restart method
+2. Execute restart command
+3. Wait for service health check
+4. Retry up to 3 times on failure
+
+### Phase 6: Validate with Playwright (MANDATORY)
+
+> ⚠️ **CRITICAL**: This phase is NOT optional. Fix is INCOMPLETE without Playwright validation.
+
+**Required MCP Tools:**
+- `browser_navigate` - Navigate to test URL
+- `browser_snapshot` - Get page accessibility tree
+- `browser_click` - Click elements
+- `browser_type` - Type into inputs
+- `browser_take_screenshot` - Capture proof
+
+**Steps:**
+1. Navigate to test starting URL
+2. Reproduce EXACT test scenario from `groups[].steps`
+3. Verify each step passes
+4. Capture screenshot: `fix/{fix-id}/validation_pass.png` or `validation_fail.png`
+
+### Phase 7: Generate Reports
+
+**fix_result.json:**
+```json
+{
+  "fixId": "string",
+  "status": "success" | "failed",
+  "startTime": "ISO timestamp",
+  "endTime": "ISO timestamp",
+  "duration": "2m 15s",
+  "sourceFile": "path/to/case.json",
+  "caseName": "string",
+  "phases": {
+    "parse": "completed",
+    "analyze": "completed",
+    "fix": "completed",
+    "restart": "completed",
+    "validate": "completed",
+    "verify_output": "completed"
+  },
+  "rootCause": {
+    "file": "path/to/file.py",
+    "line": 145,
+    "type": "missing_validation",
+    "description": "Description"
+  },
+  "changes": [
+    {
+      "file": "path/to/file.py",
+      "type": "modification",
+      "linesChanged": 5,
+      "description": "What was changed"
+    }
+  ],
+  "validation": {
+    "status": "passed" | "failed",
+    "stepsTotal": 5,
+    "stepsPassed": 5,
+    "screenshot": "fix/{fix-id}/validation_pass.png",
+    "playwrightUsed": true
+  },
+  "outputVerification": {
+    "fix_result.json": true,
+    "validation_screenshot": true,
+    "fix_note.md": true,
+    "allFilesPresent": true
+  },
+  "retryCount": 0
+}
+```
+
+**fix_note.md:**
+```markdown
+# Fix Report: {fix-id}
+
+## Summary
+- **Status**: SUCCESS | FAILED
+- **Duration**: 2m 15s
+- **Case**: {caseName}
+
+## Root Cause
+- **File**: path/to/file.py:145
+- **Issue**: Description
+- **Impact**: Impact description
+
+## Changes Made
+1. **file.py** - What was changed
+
+## Validation
+- **Method**: Playwright MCP
+- **Result**: PASSED (5/5 steps)
+- **Screenshot**: validation_pass.png
+```
+
+### Phase 8: Verify Output (MANDATORY)
+
+**Required Files:**
+- [ ] `fix/{fix-id}/fix_result.json` - exists and valid JSON
+- [ ] `fix/{fix-id}/validation_*.png` - exists and non-empty
+- [ ] `fix/{fix-id}/fix_note.md` - exists and non-empty
+
+> Fix is INCOMPLETE if any file is missing.
+
+---
+
+## Error Recovery
+
+### Retry Configuration
+
+```json
+{
+  "maxRetries": 3,
+  "retryDelayMs": 5000,
+  "backoffMultiplier": 2
+}
+```
+
+### Error Classification
+
+**Transient (Auto-Retry):**
+- Network timeouts
+- Service not ready
+- Browser automation glitches
+- Port conflicts
+
+**Permanent (Abort):**
+- Syntax errors
+- Missing dependencies
+- Permission denied
+- Test logic failure
+
+### Recovery by Phase
+
+| Phase | On Failure | Action |
+|-------|------------|--------|
+| Parse | Retry 3x | Report & abort |
+| Analyze | Retry 3x | Report & abort |
+| Fix | Report | Abort with diagnosis |
+| Restart | Retry 3x | Report & abort |
+| Validate | Retry 3x | Capture failure screenshot |
+| Verify | Generate | Create missing files |
+
+---
+
+## Fix Patterns
+
 
 ### Pattern 1: Code Logic Error
 ```
-Error indicates bug → Locate source → Analyze root cause → Apply fix → Restart service → Playwright validation
+Error Analysis → Source Location → Fix → Restart → Playwright Validate
 ```
 
 ### Pattern 2: UI Interaction Failure
 ```
-Screenshot shows issue → Identify selector/state problem → Fix component → Restart service → Playwright re-test
+Screenshot Analysis → Selector Issue → Fix Component → Restart → Playwright Validate
 ```
 
-### Pattern 3: Validation Missing
+### Pattern 3: Missing Validation
 ```
-Error shows validation gap → Add validation logic → Restart service → Playwright validation
-```
-
-## Service Restart Detection Strategy
-
-**Priority Order:**
-1. **CLAUDE.md**: Check for service management instructions
-2. **Shell Scripts**: Search for restart.sh, start.sh, stop.sh
-3. **Package.json**: Check for npm scripts (start, restart, dev)
-4. **Docker**: Look for docker-compose.yml or Dockerfile
-5. **Process Managers**: Check for PM2, systemd, supervisord configs
-
-**Search Locations:**
-- Project root: `./restart.sh`, `./start.sh`, `./stop.sh`
-- Scripts directory: `./scripts/`, `./bin/`, `./tools/`
-- Backend directory: `./backend/`, `./server/`
-- Configuration: `package.json`, `docker-compose.yml`
-
-## Fix Workflow Example
-
-```
-/test-fix assets/case_test_result/failed_test.json
-
-Output:
-📖 Reading ALL related files... (MANDATORY)
-   ✅ Loaded: failed_test.json (complete structure)
-   ✅ Read: screenshot_step1.png (visual analysis)
-   ✅ Read: screenshot_error.png (failure state)
-   ✅ Read: test_case_definition.json (workflow)
-   ✅ Read: backend/app/auth.py (source code)
-   ✅ Complete file reading - NO files skipped
-
-📋 Analyzing test results...
-❌ Found 1 fixable bug in login validation
-
-🔍 Root Cause:
-   File: backend/app/auth.py:145
-   Issue: Password length check missing
-   Evidence: Screenshot shows validation bypass
-
-🔧 Applying fix...
-   ✅ Added validation: len(password) >= 8
-   ✅ Complete fix implementation - NO shortcuts
-
-🔄 Restarting service... (MANDATORY)
-   📖 Reading CLAUDE.md for restart instructions
-   🔍 Searching for restart scripts: restart.sh, start.sh, stop.sh
-   ✅ Found: ./scripts/restart.sh
-   ⚡ Executing: bash ./scripts/restart.sh
-   ✅ Service restarted successfully
-   ✅ Verified service running on port 8000
-
-🎭 Validating with Playwright... (MANDATORY - NO EXCEPTIONS)
-   🌐 Launching browser automation
-   📸 Executing FULL UI test workflow (exact reproduction)
-   ✅ Page loaded: http://localhost:8000/login
-   ✅ Step 1: Enter username - PASS
-   ✅ Step 2: Enter short password - PASS (validation triggered)
-   ✅ Step 3: Validation error shown - PASS
-   ✅ Step 4: Enter valid password - PASS
-   ✅ Step 5: Login flow completed - PASS
-   📸 Screenshot captured and saved: fix/validation_login_test_20251229_143052.png
-   ✅ Visual verification: ALL steps passed
-
-📊 Summary:
-   - Files read: 5/5 (100% - NO files skipped)
-   - Bugs fixed: 1/1 (100% complete)
-   - Service restarted: ✅ SUCCESS
-   - Playwright validation: ✅ PASS (ALL steps)
-   - Screenshot proof: ✅ fix/validation_login_test_20251229_143052.png saved
-   - Steps completed: 7/7 (100% - NO steps skipped)
-   - Fix status: ✅ COMPLETE (fully validated)
-   - Time: 18.7s
+Validation Gap → Add Logic → Restart → Playwright Validate
 ```
 
-## Correctness Guarantees
-
-**Pre-Fix Safety:**
-- ✅ Read ALL files completely (test results, screenshots, source code, configs)
-- ✅ Root cause identified with evidence from visual and code analysis
-- ✅ Fix scope limited to bug location
-- ✅ No regression risk assessed
-- ✅ Rollback strategy prepared
-
-**Post-Fix Validation (MANDATORY - NO EXCEPTIONS):**
-- ✅ **Read ALL related files first** (REQUIRED)
-  - Test result JSON (complete structure)
-  - ALL screenshots referenced
-  - Test case definitions
-  - Source code files
-  - Configuration files
-- ✅ **Detect and execute service restart** (REQUIRED)
-  - Read CLAUDE.md for instructions
-  - Search for restart/start/stop scripts
-  - Execute restart before testing
-  - Verify service is running
-- ✅ **Playwright page-level testing** (REQUIRED for ALL fixes - NO EXCEPTIONS)
-  - Full UI workflow execution
-  - Browser automation with real user interactions
-  - **Reproduce EXACT test scenario from failure**
-  - **Visual screenshot comparison**
-  - **Save screenshot as `fix/validation_<case-name>_<timestamp>.png`**
-    - Include case name for uniqueness
-    - Save in `fix/` directory
-    - Example: `fix/validation_问题类型管理_20251229_143052.png`
-  - **ALL steps must pass - no partial success**
-- ✅ Re-run failed test case with Playwright
-- ✅ Run related test suite
-- ✅ Verify no new errors introduced
-
-**Success Criteria (ALL MUST BE MET - NO SHORTCUTS):**
-1. ✅ All related files read completely
-2. ✅ Root cause identified with evidence
-3. ✅ Complete fix applied (no partial fixes)
-4. ✅ Service restarted successfully
-5. ✅ Playwright validation executed
-6. ✅ ALL test steps passed
-7. ✅ Screenshot proof saved (`fix/validation_<case-name>_<timestamp>.png`)
-8. ✅ No steps skipped or ignored
-
-**Failure Conditions (Fix is INCOMPLETE if ANY occurs):**
-- ❌ Skipped reading any related files
-- ❌ Did not analyze all screenshots
-- ❌ Partial fix implementation
-- ❌ Service not restarted
-- ❌ Playwright validation not executed
-- ❌ Playwright validation failed
-- ❌ Screenshot proof not saved
-- ❌ Any step skipped or ignored
-
-**Action on Failure:**
-- Report failure clearly
-- Preserve original code if uncertain
-- **NEVER mark fix as complete without Playwright validation passing**
-- **NEVER skip validation steps**
+### Pattern 4: Race Condition
+```
+Timing Issue → Add Synchronization → Restart → Playwright Validate
+```
 
 
 ---
 
-**Core Principle**:
+## Tool Coordination
 
-**NO SHORTCUTS. NO SKIPPING. 100% COMPLETION REQUIRED.**
+| Tool | Purpose |
+|------|---------|
+| Read | Load JSON, screenshots, source files |
+| Grep | Search codebase for bug locations |
+| Edit | Apply targeted code fixes |
+| Bash | Execute service restart commands |
+| Playwright MCP | Execute validation (MANDATORY) |
+| TodoWrite | Track fix progress |
 
-1. **Read EVERYTHING** - All test files, screenshots, source code, configs
-2. **Fix COMPLETELY** - No partial implementations or workarounds
-3. **Restart ALWAYS** - Service must be restarted before validation
-4. **Validate with Playwright** - Mandatory page-level testing, exact scenario reproduction
-5. **Prove with Screenshot** - Must save `fix/validation_<case-name>_<timestamp>.png` as proof
-   - Include case name for uniqueness
-   - Save in `fix/` directory for organization
-6. **Pass ALL Steps** - Every step must succeed, no partial success accepted
+---
 
-**Fix with 100% confidence through complete validation, or don't fix at all.**
-**Validation is NOT optional - it is the DEFINITION of completion.**
+## Success Criteria
 
+**Fix is COMPLETE when ALL are true:**
+1. All related files read
+2. Root cause identified with evidence
+3. Complete fix applied
+4. Service restarted
+5. Playwright validation executed
+6. All test steps passed (or failure documented)
+7. `fix_result.json` exists and valid
+8. `validation_*.png` exists
+9. `fix_note.md` exists
+10. Output verification passed
+
+**Fix is INCOMPLETE if ANY occurs:**
+- Skipped reading files
+- Partial fix implementation
+- Service not restarted
+- Playwright validation NOT executed
+- Output files missing
+- Any step skipped
+
+---
+
+## Validation Failure Handling
+
+1. Retry up to 3 times with exponential backoff
+2. Capture failure screenshot: `validation_fail.png`
+3. Update `fix_result.json` with failure details
+4. Generate `fix_note.md` with diagnosis
+5. Verify all output files exist
+6. Document failure reason
+
+---
+
+## Best Practices
+
+### Screenshot Analysis
+- Compare before/after states
+- Look for UI state inconsistencies
+- Verify error messages match expectations
+
+### Service Restart
+- Verify health after restart
+- Check logs for errors
+- Wait for full initialization
+
+### Playwright Validation
+- Wait for elements before interacting
+- Verify intermediate states
+- Capture proof screenshots
+
+### Fix Quality
+- Prefer specific fixes over broad changes
+- Add defensive checks
+- Follow existing code conventions
+
+---
+
+## Principles
+
+1. **Read EVERYTHING** - All test files, screenshots, source code
+2. **Fix COMPLETELY** - No partial implementations
+3. **Restart ALWAYS** - Service must restart before validation
+4. **Validate with Playwright** - MANDATORY, no exceptions
+5. **Recover on Failure** - Auto-retry transient errors
+6. **Prove with Artifacts** - Save all 3 output files
+7. **Verify Output** - Check files exist before completing
+8. **Pass ALL Steps** - Every step must succeed
