@@ -94,12 +94,7 @@ fix/{fix-id}/
 
 1. Generate or use provided `fix-id`
 2. Create output directory: `fix/{fix-id}/`
-3. Initialize `fix_result.json`: status `"in_progress"`, all phases `"pending"`
-
-**Phase Update Rules**:
-- Each phase start → `"phase_name": "in_progress"`
-- Each phase complete → `"phase_name": "completed"` + add phase data
-- On failure → `"phase_name": "failed"` + error details
+3. Collect start time for duration calculation
 
 ### Phase 1: Parse
 
@@ -121,9 +116,8 @@ fix/{fix-id}/
 2. Trace failure through execution flow
 3. Identify root cause with evidence
 4. Document: file, line, type, description
-5. Add `rootCause` to fix_result.json
 
-**Analysis Output:**
+**Analysis Output (keep in memory for Phase 6):**
 ```json
 {
   "rootCause": {
@@ -140,7 +134,7 @@ fix/{fix-id}/
 1. Implement targeted fix for root cause
 2. Apply defensive coding practices
 3. Follow existing code patterns
-4. Add `changes` array to fix_result.json
+4. Track changes (keep in memory for Phase 6)
 
 **Quality Checklist:**
 - [ ] Addresses root cause (not symptoms)
@@ -178,10 +172,11 @@ fix/{fix-id}/
 - **Pattern**: Extract everything after port from original URL and append to new base URL
 
 **Validation Requirements:**
-- Use Playwright MCP tools to reproduce the exact test scenario
-- Navigate to the validation URL and interact with elements
-- Verify each step's expected outcome (element presence, text content, API responses)
-- Capture screenshot as validation proof
+- **MUST follow the exact steps** defined in `groups[].steps[]` from the test result JSON
+- Reproduce each step in order: read `stepDescription` and execute corresponding Playwright actions
+- Verify each step's expected outcome (element presence, text content, state changes)
+- If any step fails, document the failure and capture screenshot
+- Capture final screenshot as validation proof
 
 **Steps:**
 1. **Extract full URL path**: Parse original test URL to get everything after `host:port` (path + query + hash)
@@ -189,20 +184,32 @@ fix/{fix-id}/
    - Example: `http://172.27.1.44:20001/dashboard/users?tab=active#section2`
    - Becomes: `http://127.0.0.1:3000/dashboard/users?tab=active#section2`
 3. **Navigate using Playwright**: `playwright_navigate` to the constructed URL
-4. **Reproduce EXACT test scenario** from `groups[].steps` using Playwright tools
-5. **Verify each step passes** - check for expected elements and states
-6. **Capture screenshot**: `playwright_screenshot` → `fix/{fix-id}/validation_pass.png` or `validation_fail.png`
-7. **Add validation results** to fix_result.json
+4. **Execute test steps sequentially**: For each step in `groups[].steps[]`:
+   - Read `stepDescription` to understand the action
+   - Use appropriate Playwright tools to perform the action (click, fill, evaluate, etc.)
+   - Verify the step completed successfully
+   - **If step fails**: Capture failure screenshot, analyze issue, go to step 5
+   - If step has `screenshot`, optionally compare with original for reference
+5. **On validation failure** (any step fails):
+   - Capture failure screenshot and analyze root cause
+   - Return to **Phase 3: Fix** - implement additional fix for the validation failure
+   - Return to **Phase 4: Restart Service** - restart to apply new fixes
+   - Return to **Phase 5: Validate** - retest with Playwright (repeat this phase)
+   - Increment `retryCount` (max 3 retries)
+   - If `retryCount >= 3` and still failing, proceed to Phase 6 with failure status
+6. **On validation success** (all steps pass):
+   - Track validation results: Count total steps, passed steps, failed steps
+   - Capture screenshot: `playwright_screenshot` → `fix/{fix-id}/validation_pass.png`
+   - Track validation results in memory for Phase 6
+   - Proceed to Phase 6
 
 ### Phase 6: Generate Reports
 
-**Final fix_result.json requirements:**
-- All phases have final status (completed/failed)
-- `rootCause`, `changes`, `validation` sections complete
-- Add `endTime`, `duration`, final `status`
-- Add `outputVerification` section
+> **CRITICAL**: ALL data collection is done. Now write ALL output files.
 
-**fix_result.json:**
+**Step 1: Write fix_result.json**
+
+Compile all collected data from previous phases:
 ```json
 {
   "fixId": "string",
@@ -251,7 +258,9 @@ fix/{fix-id}/
 }
 ```
 
-**fix_note.md:**
+**Step 2: Write fix_note.md**
+
+Generate human-readable report:
 ```markdown
 # Fix Report: {fix-id}
 
@@ -282,25 +291,6 @@ fix/{fix-id}/
 - [ ] `fix/{fix-id}/fix_note.md` - exists and non-empty
 
 > Fix is INCOMPLETE if any file is missing.
-
----
-
-## fix_result.json Update Workflow
-
-**CRITICAL**: Update at EVERY phase transition for real-time progress tracking.
-
-### Update Pattern:
-
-**Phase Lifecycle:**
-- Start: `"phase_name": "in_progress"`
-- Complete: `"phase_name": "completed"` + phase data
-- Failed: `"phase_name": "failed"` + error
-
-**Phase Data to Add:**
-- Analyze → `rootCause`
-- Fix → `changes[]`
-- Validate → `validation`
-- Verify → `outputVerification`, final `status`, `endTime`, `duration`
 
 ---
 
@@ -447,7 +437,7 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 2. **Fix COMPLETELY** - No partial implementations
 3. **Restart ALWAYS** - Service must restart before validation
 4. **Validate with Playwright** - MANDATORY, no exceptions
-5. **Update fix_result.json** - EVERY phase transition must update the file
+5. **Write Reports at End** - Collect data during phases, write fix_result.json and fix_note.md in Phase 6
 6. **Recover on Failure** - Auto-retry transient errors
 7. **Prove with Artifacts** - Save all 3 output files
 8. **Verify Output** - Check files exist before completing
