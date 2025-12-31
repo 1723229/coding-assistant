@@ -82,8 +82,7 @@ All artifacts are written to `fix/{fix-id}/`:
 fix/{fix-id}/
 ├── fix_result.json      # Complete fix metadata (updated incrementally)
 ├── validation_pass.png  # Screenshot on success
-├── validation_fail.png  # Screenshot on failure
-└── fix_note.md          # Human-readable report
+└── validation_fail.png  # Screenshot on failure
 ```
 
 ### fix_result.json Incremental Write Specification
@@ -91,59 +90,34 @@ fix/{fix-id}/
 **Rule**: Update `fix_result.json` after EACH phase completion with new data from that phase.
 
 **Phase-to-Data Mapping**:
-- **Phase 1 (Parse)**: Write initial → `fixId`, `status: "in_progress"`, `startTime`, `sourceFile`, `caseName`, `phases.parse: "completed"`
-- **Phase 2 (Analyze)**: Add → `rootCause`, update `phases.analyze: "completed"`
-- **Phase 3 (Fix)**: Add → `changes[]`, update `phases.fix: "completed"`
-- **Phase 4 (Restart)**: Update → `phases.restart: "completed"`
-- **Phase 5 (Validate)**: Add → `validation`, `retryCount`, update `phases.validate: "completed"`
-- **Phase 6 (Reports)**: Add → `endTime`, `duration`, `status: "success"`, `outputVerification`, update `phases.verify_output: "completed"` + write `fix_note.md`
+- **Phase 1 (Parse)**: Write initial → `fixId`, `status: "in_progress"`, `caseName`
+- **Phase 2 (Analyze)**: Add → `rootCause` (file, line, description)
+- **Phase 3 (Fix)**: Add → `changes[]` (file, description)
+- **Phase 4 (Restart)**: (No JSON update required)
+- **Phase 5 (Validate)**: Add → `validation` (status, screenshot)
+- **Phase 6 (Finalize)**: Update → `status: "success"` or `status: "failed"`
 
 **Complete Schema** (final state):
 ```json
 {
   "fixId": "string",
   "status": "success",
-  "startTime": "ISO timestamp",
-  "endTime": "ISO timestamp",
-  "duration": "2m 15s",
-  "sourceFile": "path/to/case.json",
   "caseName": "string",
-  "phases": {
-    "parse": "completed",
-    "analyze": "completed",
-    "fix": "completed",
-    "restart": "completed",
-    "validate": "completed",
-    "verify_output": "completed"
-  },
   "rootCause": {
     "file": "path/to/file.py",
     "line": 145,
-    "type": "missing_validation | logic_error | selector_error | race_condition",
     "description": "Clear explanation"
   },
   "changes": [
     {
       "file": "path/to/file.py",
-      "type": "modification",
-      "linesChanged": 5,
       "description": "What was changed"
     }
   ],
   "validation": {
     "status": "passed",
-    "stepsTotal": 5,
-    "stepsPassed": 5,
-    "screenshot": "fix/{fix-id}/validation_pass.png",
-    "playwrightUsed": true
-  },
-  "outputVerification": {
-    "fix_result.json": true,
-    "validation_screenshot": true,
-    "fix_note.md": true,
-    "allFilesPresent": true
-  },
-  "retryCount": 0
+    "screenshot": "validation_pass.png"
+  }
 }
 ```
 
@@ -256,41 +230,16 @@ fix/{fix-id}/
    - Update fix_result.json
    - Proceed to Phase 6
 
-### Phase 6: Generate Reports
+### Phase 6: Finalize
 
 **Steps:**
-1. Update fix_result.json (add endTime, duration, status, outputVerification)
-2. Write fix_note.md
-
-**fix_note.md Format:**
-```markdown
-# Fix Report: {fix-id}
-
-## Summary
-- **Status**: SUCCESS | FAILED
-- **Duration**: 2m 15s
-- **Case**: {caseName}
-
-## Root Cause
-- **File**: path/to/file.py:145
-- **Issue**: Description
-- **Impact**: Impact description
-
-## Changes Made
-1. **file.py** - What was changed
-
-## Validation
-- **Method**: Playwright MCP
-- **Result**: PASSED (5/5 steps)
-- **Screenshot**: validation_pass.png
-```
+1. Update fix_result.json with final status ("success" or "failed")
 
 ### Phase 7: Verify Output (MANDATORY)
 
 **Required Files:**
 - [ ] `fix/{fix-id}/fix_result.json` - exists and valid JSON
 - [ ] `fix/{fix-id}/validation_*.png` - exists and non-empty
-- [ ] `fix/{fix-id}/fix_note.md` - exists and non-empty
 
 > Fix is INCOMPLETE if any file is missing.
 
@@ -385,8 +334,7 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 6. All test steps passed (or failure documented)
 7. `fix_result.json` exists and valid
 8. `validation_*.png` exists
-9. `fix_note.md` exists
-10. Output verification passed
+9. Output verification passed
 
 **Fix is INCOMPLETE if ANY occurs:**
 - Skipped reading files
@@ -403,9 +351,8 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 1. Retry up to 3 times with exponential backoff
 2. Capture failure screenshot: `validation_fail.png`
 3. Update `fix_result.json` with failure details
-4. Generate `fix_note.md` with diagnosis
-5. Verify all output files exist
-6. Document failure reason
+4. Verify all output files exist
+5. Document failure reason
 
 ---
 
@@ -439,8 +386,8 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 2. **Fix COMPLETELY** - No partial implementations
 3. **Restart ALWAYS** - Service must restart before validation
 4. **Validate with Playwright** - MANDATORY, no exceptions
-5. **Write Incrementally** - Update fix_result.json after each phase completion (Parse→Analyze→Fix→Restart→Validate), write fix_note.md in Phase 6
+5. **Write Incrementally** - Update fix_result.json after each phase completion (Parse→Analyze→Fix→Restart→Validate→Finalize)
 6. **Recover on Failure** - Auto-retry transient errors
-7. **Prove with Artifacts** - Save all 3 output files
+7. **Prove with Artifacts** - Save all output files
 8. **Verify Output** - Check files exist before completing
 9. **Pass ALL Steps** - Every step must succeed
