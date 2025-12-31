@@ -281,6 +281,11 @@ fix/{fix-id}/
      - Browser console: `playwright_console_logs` (errors, warnings, console.log)
      - Network logs: Failed API requests, status codes, response bodies
      - Backend logs: `./logs/`, `./backend/logs/`, service errors
+   - **Test failed API directly** (if network error detected):
+     - Extract failed API endpoint from network logs
+     - Use `curl` to test API independently: `curl -X POST http://... -H "..." -d "..."`
+     - Verify API response status, headers, body
+     - Confirm if issue is API-level or frontend integration
    - **Compare with original failure**:
      - Read original error from test result JSON
      - Check if current failure is same as original
@@ -291,14 +296,14 @@ fix/{fix-id}/
      - Verify no side effects from the fix
    - **Identify failure type**:
      - UI: Element not found, selector changed, timing issue
-     - Backend: API error, service crash
+     - Backend API: API error, service crash, endpoint failure (confirmed via curl)
      - Data: Validation error, state mismatch
      - Network: Timeout, connection refused
    - **Analyze fix effectiveness**:
      - If same error → Fix incomplete, needs different approach
      - If new error → Fix caused regression, need rollback + new fix
      - If progress made → Partial fix, continue iteration
-   - **Document in fix_result.json**: Failure type, error message, log excerpts, suspected cause, comparison with original
+   - **Document in fix_result.json**: Failure type, error message, log excerpts, API test results, suspected cause, comparison with original
    - **Decision**:
      - Same error as original → Fix failed, try different approach in **Phase 3**
      - New error (regression) → Rollback fix, analyze side effects, return to **Phase 3**
