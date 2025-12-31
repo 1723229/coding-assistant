@@ -11,21 +11,69 @@ personas: [root-cause-analyst]
 
 Automatic test failure analysis and fix with mandatory Playwright validation.
 
-## Usage
+## Command Structure
 
 ```bash
 /test-fix <result-file> [fix-id]
 ```
 
-**Arguments:**
+## Key Characteristics
+
+| Aspect | Details |
+|--------|---------|
+| **Category** | Testing |
+| **Complexity** | Enhanced |
+| **Primary Persona** | Root Cause Analyst |
+| **MCP Server** | Playwright |
+
+## Arguments
+
 - `result-file` (required): Path to test result JSON file
 - `fix-id` (optional): Unique fix session identifier (auto-generated from `caseName` if omitted)
 
-**Examples:**
+## Usage Examples
+
 ```bash
 /test-fix test/case_test_result/case.json
 /test-fix ./test-results/case.json login-fix-001
 ```
+
+---
+
+## Operational Flow
+
+The command follows a seven-stage process:
+
+1. **Initialize** - Generate fix-id and create output directory
+2. **Parse** - Load test results, screenshots, and source code
+3. **Analyze** - Identify root cause with visual evidence
+4. **Fix** - Implement targeted code changes
+5. **Restart** - Restart service and verify health
+6. **Validate** - Execute Playwright validation (MANDATORY)
+7. **Verify** - Confirm all output artifacts exist
+
+## Core Capabilities
+
+- Auto-detect test framework and service restart method
+- Analyze visual evidence from screenshots
+- Generate targeted fixes for root causes
+- Execute browser-based validation with Playwright
+- Produce structured fix metadata and validation proof
+
+## Tool Integration
+
+- **Read**: Load JSON, screenshots, source files
+- **Grep**: Search codebase for bug locations
+- **Edit**: Apply targeted code fixes
+- **Bash**: Execute service restart commands
+- **Playwright MCP**: Execute validation (MANDATORY)
+- **TodoWrite**: Track fix progress
+
+## Scope Boundaries
+
+**Included**: Analyzing test failures, implementing fixes, service restart, Playwright validation, artifact generation
+
+**Excluded**: Creating new tests, modifying test framework configuration, skipping validation steps, partial implementations
 
 ---
 
@@ -308,20 +356,7 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 ```
 
 
----
-
-## Tool Coordination
-
-| Tool | Purpose |
-|------|---------|
-| Read | Load JSON, screenshots, source files |
-| Grep | Search codebase for bug locations |
-| Edit | Apply targeted code fixes |
-| Bash | Execute service restart commands |
-| Playwright MCP | Execute validation (MANDATORY) |
-| TodoWrite | Track fix progress |
-
----
+------
 
 ## Success Criteria
 
@@ -391,3 +426,48 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 7. **Prove with Artifacts** - Save all output files
 8. **Verify Output** - Check files exist before completing
 9. **Pass ALL Steps** - Every step must succeed
+
+---
+
+## Quick Reference
+
+### Command Invocation
+```bash
+# Basic usage (auto-generate fix-id)
+/test-fix test/case_test_result/case.json
+
+# With custom fix-id
+/test-fix ./test-results/case.json my-fix-001
+```
+
+### Output Location
+```
+fix/{fix-id}/
+├── fix_result.json      # Fix metadata
+├── validation_pass.png  # Success screenshot
+└── validation_fail.png  # Failure screenshot (if failed)
+```
+
+### Phase Checklist
+- [ ] **Parse**: Load JSON, screenshots, source code → Write initial fix_result.json
+- [ ] **Analyze**: Identify root cause → Update rootCause in JSON
+- [ ] **Fix**: Implement changes → Update changes[] in JSON
+- [ ] **Restart**: Service restart → Verify health
+- [ ] **Validate**: Playwright execution → Update validation in JSON
+- [ ] **Finalize**: Update final status → success/failed
+- [ ] **Verify**: Confirm all artifacts exist
+
+### Common Failure Patterns
+| Pattern | Root Cause Type | Fix Approach |
+|---------|----------------|--------------|
+| Code Logic Error | Logic error | Source location fix |
+| UI Interaction Failure | Selector error | Fix component selector |
+| Missing Validation | Missing validation | Add validation logic |
+| Race Condition | Race condition | Add synchronization |
+
+### Validation URL Pattern
+```
+Original: http://172.27.1.44:20001/module/feature?id=123
+Becomes:  http://127.0.0.1:3000/module/feature?id=123
+         └─ Replace host:port ─┘└─── Keep full path ───┘
+```
