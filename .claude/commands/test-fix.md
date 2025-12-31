@@ -4,7 +4,7 @@ description: "Automatically fix failed test cases with guaranteed correctness"
 category: testing
 complexity: enhanced
 mcp-servers: [playwright]
-personas: [root-cause-analyst]
+personas: [qa-specialist, root-cause-analyst]
 ---
 
 # /test-fix
@@ -23,7 +23,7 @@ Automatic test failure analysis and fix with mandatory Playwright validation.
 |--------|---------|
 | **Category** | Testing |
 | **Complexity** | Enhanced |
-| **Primary Persona** | Root Cause Analyst |
+| **Primary Personas** | QA Specialist, Root Cause Analyst |
 | **MCP Server** | Playwright |
 
 ## Arguments
