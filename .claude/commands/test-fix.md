@@ -86,7 +86,7 @@ The test result file follows this schema:
   "status": "error" | "completed",
   "caseName": "string",
   "testUrl": "http://127.0.0.1:3000/module/feature?id=123",
-  "expectedResult": "1. 断言系统显示「编码已存在」提示\n2. 验证错误提示样式正确",
+  "expectedResult": "1. 系统显示「编码已存在」提示\n2. 验证错误提示样式正确",
   "error": "string | null",
   "finalScreenshot": "path/to/image.png",
   "groups": [
@@ -251,7 +251,7 @@ fix/{fix-id}/
 
 **Expected Results**:
 - Use `expectedResult` field from test result JSON for validation criteria
-- Parse multi-line assertions (e.g., "1. 断言系统显示「编码已存在」提示\n2. 验证错误提示样式正确")
+- Parse multi-line assertions (e.g., "1. 系统显示「编码已存在」提示\n2. 验证错误提示样式正确")
 - Each line represents a validation checkpoint to verify
 
 **Validation Requirements:**
