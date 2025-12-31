@@ -115,21 +115,28 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
    - ❌ DO NOT ask about business metrics or pain points
    - ✅ ONLY focus on technical specifications and implementation details
 
-   **6.4 CRITICAL: Section 2 Content Policy** 🔴
+   **6.4 CRITICAL: Section 2 (技术栈) EXCLUSION Policy** 🔴
 
    **Section 2 (技术栈) Generation Rules:**
-   - ✅ **MUST** contain ONLY pre-filled tech stack from COMMON_KNOWLEDGE.md (subsections 2.1-2.4)
-   - ❌ **DO NOT** create "2.5 待明确的技术选型" or any clarification subsection
-   - ❌ **DO NOT** add any clarification questions (`<!-- clarification:start -->`) in Section 2
-   - ❌ **DO NOT** ask generic tech stack questions anywhere (database, framework, UI library, etc.)
+   - ❌ **DO NOT generate Section 2 (技术栈) at all**
+   - ✅ Tech stack information is already defined in `openspec/COMMON_KNOWLEDGE.md` and does NOT need clarification
+   - ✅ Start document with Section 2 (UI/UX资源) instead of tech stack
+   - ❌ **DO NOT** ask generic tech stack questions anywhere in ANY section
 
-   **Feature-Specific Tech Choices Placement:**
-   - Feature-specific technology choices (Excel library, visualization components, integration methods, etc.) **MUST be placed in Section 6 (Operations)**
-   - Place them within the relevant operation's specification
-   - Examples:
-     * Excel library choice → Section 6.6 (Export Template operation) input/output spec
-     * Flowchart component → Section 6.10 (Progress Graph operation) output spec
-     * API integration method → Relevant operation's integration spec
+   **Section Renumbering After Removing Tech Stack:**
+   - Original Section 2 (技术栈) → **REMOVED entirely**
+   - Original Section 3 (UI/UX资源) → **New Section 2**
+   - Original Section 4 (范围确认) → **New Section 3**
+   - Original Section 5 (数据Schema映射) → **New Section 4**
+   - Original Section 6 (操作详细规范) → **New Section 5**
+   - Original Section 9 (阻塞项清单) → **New Section 6**
+
+   **Feature-Specific Tech Choices Handling:**
+   - Feature-specific technology choices are developer implementation details → **Skip entirely**
+   - Examples of questions to NEVER ask:
+     * ❌ Excel library choice → Developer decision
+     * ❌ Flowchart/visualization component → Developer decision
+     * ❌ API integration method → Developer decision
 
    **6.5 CRITICAL: Tech Stack Filtering Rule** 🔴
 
@@ -140,10 +147,16 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
    - ❌ NOT include any clarification questions (`<!-- clarification:start -->`)
    - ✅ End immediately after Section 2.4 (架构模式)
 
-   **Rule 2: Feature-Specific Tech Questions Classification**
-   Before generating ANY clarification question in ALL sections, classify as:
-   - **Generic tech stack** (already in COMMON_KNOWLEDGE.md) → Skip entirely, never ask
-   - **Feature-specific tech choice** (not in COMMON_KNOWLEDGE.md) → Place in Section 6 (relevant operation)
+   **Rule 2: Complete Tech Stack Filter**
+   Before generating ANY clarification question in ALL sections, classify each question:
+   - **Any tech choice question** (generic tech stack OR feature-specific tech selection) → Skip entirely, never ask
+   - **Business requirement/configuration question** → Keep in appropriate section
+
+   Tech choice questions include ANY question asking about:
+   - Which library/component/tool to use
+   - How to implement using specific technology
+   - Which API/SDK/framework to choose
+   - Technology configuration details (vs. business configuration)
 
    **❌ SKIP entirely (Generic - already known in COMMON_KNOWLEDGE.md):**
    - Database selection (Known: MySQL for actual deployment, supports PostgreSQL/Oracle/SQL Server)
@@ -163,14 +176,60 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
    - Service registration (Known: Nacos)
    - Configuration management (Known: Nacos Config)
 
-   **✅ ASK in Section 6 Operations (Feature-specific, NOT in COMMON_KNOWLEDGE.md):**
-   - "导出功能使用哪个Excel处理库?" → Place in Section 6.6 (Export Template operation) as `<!-- clarification:start,id=c-6.6-1,type=tech_choice,... -->`
-   - "进度图使用哪个可视化组件?" → Place in Section 6.10 (Progress Graph operation) as `<!-- clarification:start,id=c-6.10-1,type=tech_choice,... -->`
-   - "此功能需要调用哪些外部API?" → Place in relevant operation's integration spec
-   - "此功能需要新增哪些数据库表?" → Place in Section 5 (Data Schema) as data schema question
-   - "前端需要新增哪些页面组件?" → Place in Section 6 (relevant operation) as UI components question
-   - "数据如何在Redis中缓存?" → Place in relevant operation as cache strategy question
-   - "使用哪个RabbitMQ交换机?" → Place in relevant operation as messaging question
+   **❌ ALSO SKIP (Feature-specific tech choices - developer decisions, not PM requirements):**
+   - "导出功能使用哪个Excel处理库?" → Developer decision, not business requirement
+   - "进度图使用哪个可视化组件?" → Developer decision, not business requirement
+   - "此功能需要调用哪些外部API?" → Only ask if PRD explicitly mentions external system integration
+   - "数据如何在Redis中缓存?" → Developer decision on cache implementation
+   - "使用哪个RabbitMQ交换机?" → Developer decision on messaging implementation
+   - "文件上传使用什么组件?" → Developer decision, not business requirement
+
+   **✅ KEEP (Business requirements and configurations):**
+   - "导出数据量限制是多少?" → Business boundary condition
+   - "缓存过期时间设置为多久?" → Business configuration requirement
+   - "外部系统接口协议是什么?" → Business integration requirement (only if PRD mentions external system)
+   - "审批通知的内容包含哪些字段?" → Business requirement
+   - "进度图展示哪些维度的数据?" → Business requirement
+   - "文件上传支持哪些格式?" → Business requirement
+
+   **Rule 2.1: Tech Choice Question Detection Patterns**
+
+   A question is considered a "tech choice question" if it matches ANY of these patterns:
+
+   **Pattern A: Direct Tech Selection**
+   - "使用什么[技术/库/组件/框架]"
+   - "选择哪个[库/工具/技术]"
+   - "采用什么技术实现"
+   - "[功能]用什么库"
+   - Question contains specific technology library/tool option lists
+
+   **Pattern B: Tech Implementation Method**
+   - "如何实现[技术细节]" (when question focuses on technical means, not business requirements)
+   - "使用哪个API/SDK/组件"
+   - "通过什么技术/组件实现"
+
+   **Complete Examples of Tech Choice Questions to SKIP:**
+   ```markdown
+   ❌ "导出功能使用哪个Excel处理库?" → Technology selection
+   ❌ "进度图使用哪个可视化组件?" → Technology selection
+   ❌ "数据如何在Redis中缓存?" → Technical implementation detail
+   ❌ "使用哪个RabbitMQ交换机?" → Technology configuration
+   ❌ "审批通知通过哪个消息队列发送?" → Technology selection
+   ❌ "文件上传使用什么组件?" → Technology selection
+   ❌ "采用什么加密算法?" → Technology selection
+   ❌ "使用哪个日期处理库?" → Technology selection
+   ```
+
+   **Complete Examples of Business Questions to KEEP:**
+   ```markdown
+   ✅ "导出数据量限制是多少?" → Business boundary condition
+   ✅ "缓存过期时间设置为多久?" → Business configuration requirement
+   ✅ "审批通知的内容包含哪些字段?" → Business requirement
+   ✅ "文件上传支持哪些格式?" → Business requirement
+   ✅ "进度图展示哪些维度的数据?" → Business requirement
+   ✅ "用户权限如何划分?" → Business requirement
+   ✅ "审批流程包含哪些步骤?" → Business requirement
+   ```
 
    **Application Scope:**
    - **Section 2 (技术栈)**: MOST CRITICAL - Skip ALL questions, only pre-fill from COMMON_KNOWLEDGE.md
@@ -190,32 +249,58 @@ Convert a specific module/function from the PRD into `docs/PRD-Gen/clarification
    ❌ "文件存储方案?" → Already known (MinIO)
    ```
 
-   **Example - What to ASK and WHERE (Feature-specific tech choices):**
+   **Example - Updated Approach (Skip ALL tech choices):**
+
+   **Scenario: PRD mentions "导出质量数据为Excel报表"**
+
+   **❌ OLD approach (Feature-specific tech questions in Section 6 - NO LONGER VALID):**
    ```markdown
-   ✅ In Section 6.6 (Export operation):
-   <!-- clarification:start,id=c-6.6-1,type=tech_choice,section=6.6,prd_ref=行205,priority=medium,status=pending -->
+   <!-- clarification:start,id=c-6.6-1,type=tech_choice,... -->
    **Excel处理库选择:**
-   - [ ] Apache POI (Java标准库，功能完整)
-   - [ ] EasyExcel (阿里开源，适合大数据量)
+   - [ ] Apache POI
+   - [ ] EasyExcel
    - [ ] 其他: ___________
    <!-- clarification:end -->
-
-   ✅ In Section 6.10 (Progress Graph operation):
-   <!-- clarification:start,id=c-6.10-1,type=tech_choice,section=6.10,prd_ref=行205,priority=medium,status=pending -->
-   **流程图可视化组件:**
-   - [ ] AntV G6 (蚂蚁金服图可视化引擎，与Ant Design配套)
-   - [ ] D3.js (自定义图形绘制，灵活性高)
-   - [ ] 自研组件
-   - [ ] 其他: ___________
-   <!-- clarification:end -->
-
-   ✅ In Section 5 (Data Schema):
-   "审批节点数据存储在哪张表?" (Feature-specific data structure)
-
-   ✅ In Section 6 operations:
-   "审批记录如何在Redis中缓存?" (Feature-specific cache strategy)
-   "审批通知通过哪个RabbitMQ交换机发送?" (Feature-specific messaging config)
    ```
+   **Reasoning:** "Excel处理库选择" is a technology implementation detail → Developer decides based on project standards
+
+   **✅ NEW approach (Skip tech choice, keep business requirements):**
+   ```markdown
+   ### 6.6 导出操作
+
+   **操作ID:** export-quality-data
+   **触发条件:** 用户点击"导出"按钮
+   **输入参数:**
+   - 导出范围: 当前筛选条件、全部数据、选中数据
+   - 导出格式: Excel (.xlsx)
+
+   **业务逻辑:**
+   1. 根据导出范围查询数据
+   2. 生成 Excel 文件
+   3. 返回下载链接
+
+   <!-- clarification:start,id=c-6.6-1,type=boundary,section=6.6,prd_ref=需补充,priority=medium,status=pending -->
+   **导出数据量限制:**
+   - 单次导出最多支持 _______ 条记录
+   - 超过限制时如何处理: [ ] 分批导出 [ ] 报错提示 [ ] 后台任务
+   <!-- clarification:end -->
+
+   <!-- clarification:start,id=c-6.6-2,type=business_logic,section=6.6,prd_ref=需补充,priority=high,status=pending -->
+   **导出内容范围:**
+   - [ ] 当前筛选结果
+   - [ ] 全部数据
+   - [ ] 用户选中的记录
+   <!-- clarification:end -->
+
+   **输出结果:** Excel文件下载链接
+   **异常处理:** 数据量超限、生成失败
+   **PRD定位:** 行xxx-xxx
+   ```
+
+   **Key differences:**
+   - ❌ "Excel处理库选择" is a tech implementation detail → Skip entirely
+   - ✅ "导出数据量限制" is a business requirement → PM must specify based on business needs
+   - ✅ "导出内容范围" is a business requirement → PM must clarify expected user behavior
 
 7. **Generate and Validate `docs/PRD-Gen/clarification.md`** 🔴 CRITICAL: DO NOT SKIP VALIDATION
 
