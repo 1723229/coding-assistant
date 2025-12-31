@@ -223,21 +223,20 @@ fix/{fix-id}/
 ### Phase 4: Restart Service
 
 **Detection Priority:**
-1. CLAUDE.md instructions
-2. Shell scripts: `restart.sh`, `start.sh`, `stop.sh`
-3. npm scripts in `package.json`
+1. Shell scripts: `restart.sh`, `start.sh`, `stop.sh`
+2. CLAUDE.md instructions (fallback)
 
 **Search Locations:**
 ```
-./restart.sh, ./start.sh, ./stop.sh, ./scripts/, ./bin/, ./frontend/, ./backend/, package.json
+./restart.sh, ./start.sh, ./stop.sh
+./scripts/restart.sh, ./scripts/start.sh
 ```
 
 **Steps:**
-1. Detect restart method
-2. Execute restart command
-3. Wait for service health check
+1. Find and execute restart script
+2. Wait 5-10 seconds for service startup
+3. Verify service is running
 4. Retry up to 3 times on failure
-5. Update fix_result.json
 
 ### Phase 5: Validate with Playwright (MANDATORY)
 
