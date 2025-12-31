@@ -85,6 +85,8 @@ The test result file follows this schema:
 {
   "status": "error" | "completed",
   "caseName": "string",
+  "testUrl": "http://127.0.0.1:3000/module/feature?id=123",
+  "expectedResult": "1. 断言系统显示「编码已存在」提示\n2. 验证错误提示样式正确",
   "error": "string | null",
   "finalScreenshot": "path/to/image.png",
   "groups": [
@@ -113,6 +115,8 @@ The test result file follows this schema:
 |-------|-------------|
 | `status` | Overall test result: `error` (failed) or `completed` (passed) |
 | `caseName` | Test case name, used as default `fix-id` |
+| `testUrl` | Complete test URL (no need for address replacement) |
+| `expectedResult` | Expected validation results (multi-line assertions) |
 | `error` | Top-level error message (null if passed) |
 | `finalScreenshot` | Path to final state screenshot |
 | `groups` | Ordered list of test groups (objectives) |
@@ -239,40 +243,45 @@ fix/{fix-id}/
 
 > ⚠️ **CRITICAL**: This phase is NOT optional. Fix is INCOMPLETE without Playwright validation.
 
-**Base URL Configuration**:
-- **CRITICAL**: ALWAYS preserve the FULL path and query parameters from original test URL
-- Replace ONLY the host:port portion with `127.0.0.1:{port}` (default port: `3000`)
-- **Example**: `http://172.27.1.44:20001/module/feature?id=123` → `http://127.0.0.1:3000/module/feature?id=123`
-- **NEVER** navigate to `http://127.0.0.1:3000` alone - this triggers login and breaks validation
-- **Pattern**: Extract everything after port from original URL and append to new base URL
+**Test URL**:
+- Use `testUrl` field directly from test result JSON
+- No URL transformation needed - the URL is already correct
+- Example: `"testUrl": "http://127.0.0.1:3000/problem-closed-loop-management/problem-type-management"`
+
+**Expected Results**:
+- Use `expectedResult` field from test result JSON for validation criteria
+- Parse multi-line assertions (e.g., "1. 断言系统显示「编码已存在」提示\n2. 验证错误提示样式正确")
+- Each line represents a validation checkpoint to verify
 
 **Validation Requirements:**
 - **MUST follow the exact steps** defined in `groups[].steps[]` from the test result JSON
 - Reproduce each step in order: read `stepDescription` and execute corresponding Playwright actions
 - Verify each step's expected outcome (element presence, text content, state changes)
-- If any step fails, document the failure and capture screenshot
+- **MUST verify expectedResult** after completing all steps
+- If any step or expected result fails, document the failure and capture screenshot
 - Capture final screenshot as validation proof
 
 **Steps:**
-1. **Extract full URL path**: Parse original test URL to get everything after `host:port` (path + query + hash)
-2. **Build validation URL**: `http://127.0.0.1:3000{full_path_with_query_and_hash}`
-   - Example: `http://172.27.1.44:20001/dashboard/users?tab=active#section2`
-   - Becomes: `http://127.0.0.1:3000/dashboard/users?tab=active#section2`
-3. **Navigate using Playwright**: `playwright_navigate` to the constructed URL
-4. **Execute test steps sequentially**: For each step in `groups[].steps[]`:
+1. **Read testUrl**: Extract `testUrl` from test result JSON
+2. **Navigate using Playwright**: `playwright_navigate` to the `testUrl` directly
+3. **Execute test steps sequentially**: For each step in `groups[].steps[]`:
    - Read `stepDescription` to understand the action
    - Use appropriate Playwright tools to perform the action (click, fill, evaluate, etc.)
    - Verify the step completed successfully
    - **If step fails**: Capture failure screenshot, analyze issue, go to step 5
    - If step has `screenshot`, optionally compare with original for reference
-5. **On validation failure** (any step fails):
+4. **Verify expectedResult**: After all steps complete:
+   - Parse `expectedResult` into individual assertions
+   - Verify each assertion using Playwright (check text, element state, etc.)
+   - **If any assertion fails**: Document which assertion failed
+5. **On validation failure** (any step or assertion fails):
    - Capture failure screenshot and analyze root cause
    - Return to **Phase 3: Fix** - implement additional fix for the validation failure
    - Return to **Phase 4: Restart Service** - restart to apply new fixes
    - Return to **Phase 5: Validate** - retest with Playwright (repeat this phase)
    - Increment `retryCount` (max 3 retries)
    - If `retryCount >= 3` and still failing, proceed to Phase 6 with failure status
-6. **On validation success** (all steps pass):
+6. **On validation success** (all steps and assertions pass):
    - Track validation results: Count total steps, passed steps, failed steps
    - Capture screenshot: `playwright_screenshot` → `fix/{fix-id}/validation_pass.png`
    - Update fix_result.json
@@ -464,10 +473,3 @@ fix/{fix-id}/
 | UI Interaction Failure | Selector error | Fix component selector |
 | Missing Validation | Missing validation | Add validation logic |
 | Race Condition | Race condition | Add synchronization |
-
-### Validation URL Pattern
-```
-Original: http://172.27.1.44:20001/module/feature?id=123
-Becomes:  http://127.0.0.1:3000/module/feature?id=123
-         └─ Replace host:port ─┘└─── Keep full path ───┘
-```
