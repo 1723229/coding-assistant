@@ -190,11 +190,13 @@ fix/{fix-id}/
 - Read ALL referenced screenshots
 - Read source files in failure path
 - Read configuration files (CLAUDE.md, package.json)
+- **Record original failure state** for comparison in Phase 5
 
 **Checklist:**
-- [ ] Test result JSON loaded
+- [ ] Test result JSON loaded (including `error`, `status`, `testUrl`, `expectedResult`)
 - [ ] ALL screenshots from `groups[].steps[].screenshot` read
-- [ ] `finalScreenshot` read
+- [ ] `finalScreenshot` read (original failure state)
+- [ ] Original error message saved for validation comparison
 - [ ] Source code files identified and read
 - [ ] Write fix_result.json (initial state)
 
@@ -267,19 +269,42 @@ fix/{fix-id}/
    - Read `stepDescription` to understand the action
    - Use appropriate Playwright tools to perform the action (click, fill, evaluate, etc.)
    - Verify the step completed successfully
-   - **If step fails**: Capture failure screenshot, analyze issue, go to step 5
+   - **If step fails**: Capture failure screenshot → go to step 5 for analysis
    - If step has `screenshot`, optionally compare with original for reference
 4. **Verify expectedResult**: After all steps complete:
    - Parse `expectedResult` into individual assertions
    - Verify each assertion using Playwright (check text, element state, etc.)
-   - **If any assertion fails**: Document which assertion failed
+   - **If any assertion fails**: Document which assertion failed → go to step 5
 5. **On validation failure** (any step or assertion fails):
-   - Capture failure screenshot and analyze root cause
-   - Return to **Phase 3: Fix** - implement additional fix for the validation failure
-   - Return to **Phase 4: Restart Service** - restart to apply new fixes
-   - Return to **Phase 5: Validate** - retest with Playwright (repeat this phase)
-   - Increment `retryCount` (max 3 retries)
-   - If `retryCount >= 3` and still failing, proceed to Phase 6 with failure status
+   - **Capture failure screenshot** with timestamp
+   - **Collect logs**:
+     - Browser console: `playwright_console_logs` (errors, warnings, console.log)
+     - Network logs: Failed API requests, status codes, response bodies
+     - Backend logs: `./logs/`, `./backend/logs/`, service errors
+   - **Compare with original failure**:
+     - Read original error from test result JSON
+     - Check if current failure is same as original
+     - Verify fix actually addressed the root cause
+   - **Check for new issues introduced**:
+     - Compare current screenshot with original `finalScreenshot`
+     - Look for regression: new errors not in original test
+     - Verify no side effects from the fix
+   - **Identify failure type**:
+     - UI: Element not found, selector changed, timing issue
+     - Backend: API error, service crash
+     - Data: Validation error, state mismatch
+     - Network: Timeout, connection refused
+   - **Analyze fix effectiveness**:
+     - If same error → Fix incomplete, needs different approach
+     - If new error → Fix caused regression, need rollback + new fix
+     - If progress made → Partial fix, continue iteration
+   - **Document in fix_result.json**: Failure type, error message, log excerpts, suspected cause, comparison with original
+   - **Decision**:
+     - Same error as original → Fix failed, try different approach in **Phase 3**
+     - New error (regression) → Rollback fix, analyze side effects, return to **Phase 3**
+     - Intermittent failure → Retry with same fix (increment `retryCount`)
+     - `retryCount >= 3` → Phase 6 with failure status + detailed diagnosis
+   - Return to **Phase 4: Restart** → **Phase 5: Validate** (retry)
 6. **On validation success** (all steps and assertions pass):
    - Track validation results: Count total steps, passed steps, failed steps
    - Capture screenshot: `playwright_screenshot` → `fix/{fix-id}/validation_pass.png`
@@ -416,6 +441,11 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 - Verify intermediate states
 - Capture proof screenshots
 
+### Failure Analysis
+- **Check logs**: Browser console, network, backend
+- **Identify source**: UI, backend, data, or network issue
+- **Collect evidence**: Error messages, stack traces, API responses, log excerpts
+
 ### Fix Quality
 - Prefer specific fixes over broad changes
 - Add defensive checks
@@ -425,15 +455,18 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 
 ## Principles
 
-1. **Read EVERYTHING** - All test files, screenshots, source code
+1. **Read EVERYTHING** - All test files, screenshots, source code, original error
 2. **Fix COMPLETELY** - No partial implementations
 3. **Restart ALWAYS** - Service must restart before validation
 4. **Validate with Playwright** - MANDATORY, no exceptions
-5. **Write Incrementally** - Update fix_result.json after each phase completion (Parse→Analyze→Fix→Restart→Validate→Finalize)
-6. **Recover on Failure** - Auto-retry transient errors
-7. **Prove with Artifacts** - Save all output files
-8. **Verify Output** - Check files exist before completing
-9. **Pass ALL Steps** - Every step must succeed
+5. **Compare with Original** - Always check if fix resolved original error
+6. **Check for Regressions** - Ensure fix didn't introduce new issues
+7. **Collect ALL Logs** - Browser, network, backend on failure
+8. **Smart Retry Logic** - Different approach if same error persists
+9. **Write Incrementally** - Update fix_result.json after each phase completion (Parse→Analyze→Fix→Restart→Validate→Finalize)
+10. **Prove with Artifacts** - Save all output files
+11. **Verify Output** - Check files exist before completing
+12. **Pass ALL Steps** - Every step must succeed
 
 ---
 
