@@ -264,7 +264,7 @@ fix/{fix-id}/
 
 **Steps:**
 1. **Read testUrl**: Extract `testUrl` from test result JSON
-2. **Navigate using Playwright**: `playwright_navigate` to the `testUrl` directly
+2. **Navigate using Playwright**: `browser_navigate` to the `testUrl` directly
 3. **Execute test steps sequentially**: For each step in `groups[].steps[]`:
    - Read `stepDescription` to understand the action
    - Use appropriate Playwright tools to perform the action (click, fill, evaluate, etc.)
@@ -312,7 +312,7 @@ fix/{fix-id}/
    - Return to **Phase 4: Restart** → **Phase 5: Validate** (retry)
 6. **On validation success** (all steps and assertions pass):
    - Track validation results: Count total steps, passed steps, failed steps
-   - Capture screenshot: `playwright_screenshot` → `fix/{fix-id}/validation_pass.png`
+   - Capture screenshot: `browser_snapshot` → `fix/{fix-id}/validation_pass.png`
    - Update fix_result.json
    - Proceed to Phase 6
 
