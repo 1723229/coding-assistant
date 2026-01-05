@@ -94,4 +94,13 @@ executor:
 container:
   max_running_containers: 5  # 最大运行容器数量阈值
 
+# JWT认证配置
+jwt:
+  secret_key: "employee-platform-secret-key-change-this-in-production-256-bits-long"
+  refresh_secret_key: "employee-platform-refresh-secret-key-change-this-in-production-512-bits-long"
+  algorithm: "HS256"
+  access_token_expire_minutes: 30
+  refresh_token_expire_days: 7
+  auto_refresh_enabled: true
+  refresh_threshold_minutes: 10
 

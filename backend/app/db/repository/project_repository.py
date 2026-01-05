@@ -36,7 +36,7 @@ class ProjectRepository(BaseRepository[Project, ProjectCreate, ProjectUpdate]):
     async def get_projects_by_owner(
         self,
         session: AsyncSession,
-        owner: int,
+        owner: str,
         skip: int = 0,
         limit: int = 50
     ) -> List[Project]:
@@ -94,7 +94,7 @@ class ProjectRepository(BaseRepository[Project, ProjectCreate, ProjectUpdate]):
         )
 
     @async_with_session
-    async def count_projects(self, session: AsyncSession, owner: Optional[int] = None) -> int:
+    async def count_projects(self, session: AsyncSession, owner: Optional[str] = None) -> int:
         """Count projects, optionally by owner"""
         filters = {"owner": owner} if owner else None
         return await self.count(session, filters=filters)

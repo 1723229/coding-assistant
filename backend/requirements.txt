@@ -1,3 +1,4 @@
+pyjwt
 pandas
 openpyxl
 python-docx
