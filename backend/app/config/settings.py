@@ -270,6 +270,31 @@ class ContainerConfig:
 
 
 # ============================================================================
+# JWT Configuration
+# ============================================================================
+
+class JWTConfig:
+    """JWT认证配置管理"""
+
+    _jwt_config = _config.get("jwt", {})
+
+    # JWT密钥
+    SECRET_KEY = _jwt_config["secret_key"]
+    REFRESH_SECRET_KEY = _jwt_config["refresh_secret_key"]
+
+    # 加密算法
+    ALGORITHM = _jwt_config["algorithm"]
+
+    # Token过期时间
+    ACCESS_TOKEN_EXPIRE_MINUTES = _jwt_config["access_token_expire_minutes"]
+    REFRESH_TOKEN_EXPIRE_DAYS = _jwt_config["refresh_token_expire_days"]
+
+    # 自动刷新配置
+    AUTO_REFRESH_ENABLED = _jwt_config["auto_refresh_enabled"]
+    REFRESH_THRESHOLD_MINUTES = _jwt_config["refresh_threshold_minutes"]
+
+
+# ============================================================================
 # Pydantic Settings
 # ============================================================================
 
@@ -346,5 +371,6 @@ __all__ = [
     "ExecutorConfig",
     "ContainerConfig",
     "Settings",
+    "JWTConfig",
     "get_settings",
 ]

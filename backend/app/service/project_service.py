@@ -33,9 +33,9 @@ class ProjectService:
         self,
         skip: int = Query(0, ge=0, description="Number of records to skip"),
         limit: int = Query(50, ge=1, le=100, description="Maximum number of records"),
-        owner: Optional[int] = None,
+        owner: Optional[str] = None,
     ):
-        """获取项目列表"""
+        """获取项目列表（可按owner过滤）"""
         try:
             if owner:
                 projects = await self.project_repo.get_projects_by_owner(
@@ -79,12 +79,28 @@ class ProjectService:
             return BaseResponse.error(message=f"创建项目失败: {str(e)}")
 
     @log_print
-    async def get_project(self, project_id: int):
-        """获取项目详情"""
+    async def get_project(self, project_id: int, user_id: Optional[str] = None):
+        """
+        获取项目详情
+
+        Args:
+            project_id: 项目ID
+            user_id: 用户ID（从JWT token提取），如果提供则验证权限
+
+        Returns:
+            项目详情或错误信息
+        """
         try:
             project = await self.project_repo.get_project_by_id(project_id=project_id)
             if not project:
                 return BaseResponse.not_found(message=f"项目 ID {project_id} 不存在")
+
+            # 如果提供了user_id，验证项目是否属于该用户
+            if user_id and project.owner != user_id:
+                return BaseResponse.error(
+                    message="无权访问该项目",
+                    code=403
+                )
 
             return BaseResponse.success(
                 data=ProjectResponse.model_validate(project),
@@ -95,12 +111,28 @@ class ProjectService:
             return BaseResponse.error(message=f"获取项目详情失败: {str(e)}")
 
     @log_print
-    async def get_project_by_code(self, code: str):
-        """根据项目代码获取项目"""
+    async def get_project_by_code(self, code: str, user_id: Optional[str] = None):
+        """
+        根据项目代码获取项目
+
+        Args:
+            code: 项目代码
+            user_id: 用户ID（从JWT token提取），如果提供则验证权限
+
+        Returns:
+            项目详情或错误信息
+        """
         try:
             project = await self.project_repo.get_project_by_code(code=code)
             if not project:
                 return BaseResponse.not_found(message=f"项目代码 '{code}' 不存在")
+
+            # 如果提供了user_id，验证项目是否属于该用户
+            if user_id and project.owner != user_id:
+                return BaseResponse.error(
+                    message="无权访问该项目",
+                    code=403
+                )
 
             return BaseResponse.success(
                 data=ProjectResponse.model_validate(project),
@@ -115,14 +147,33 @@ class ProjectService:
         self,
         project_id: int,
         data: ProjectUpdate,
+        user_id: Optional[str] = None,
         updated_by: Optional[str] = None
     ):
-        """更新项目信息"""
+        """
+        更新项目信息
+
+        Args:
+            project_id: 项目ID
+            data: 更新数据
+            user_id: 用户ID（从JWT token提取），如果提供则验证权限
+            updated_by: 更新者标识
+
+        Returns:
+            更新后的项目或错误信息
+        """
         try:
             # Check if project exists
             existing = await self.project_repo.get_project_by_id(project_id=project_id)
             if not existing:
                 return BaseResponse.not_found(message=f"项目 ID {project_id} 不存在")
+
+            # 如果提供了user_id，验证项目是否属于该用户
+            if user_id and existing.owner != user_id:
+                return BaseResponse.error(
+                    message="无权修改该项目",
+                    code=403
+                )
 
             # If updating code, check for duplicates
             if data.code and data.code != existing.code:
@@ -144,9 +195,13 @@ class ProjectService:
             return BaseResponse.error(message=f"更新项目失败: {str(e)}")
 
     @log_print
-    async def delete_project(self, project_id: int):
+    async def delete_project(self, project_id: int, user_id: Optional[str] = None):
         """
         删除项目（递归删除所有模块及其资源）
+
+        Args:
+            project_id: 项目ID
+            user_id: 用户ID（从JWT token提取），如果提供则验证权限
 
         清理内容：
         1. 递归删除所有模块（调用 ModuleService.delete_module）
@@ -162,6 +217,13 @@ class ProjectService:
             project = await self.project_repo.get_project_by_id(project_id=project_id)
             if not project:
                 return BaseResponse.not_found(message=f"项目 ID {project_id} 不存在")
+
+            # 如果提供了user_id，验证项目是否属于该用户
+            if user_id and project.owner != user_id:
+                return BaseResponse.error(
+                    message="无权删除该项目",
+                    code=403
+                )
 
             logger.info(f"Deleting project: {project.name} (ID: {project_id})")
 
@@ -214,9 +276,13 @@ class ProjectService:
             return BaseResponse.error(message=f"删除项目失败: {str(e)}")
 
     @log_print
-    async def get_leaf_modules_content_status(self, project_id: int):
+    async def get_leaf_modules_content_status(self, project_id: int, user_id: Optional[str] = None):
         """
         获取项目下所有叶子模块(POINT类型)的ID和content_status
+
+        Args:
+            project_id: 项目ID
+            user_id: 用户ID（从JWT token提取），如果提供则验证权限
 
         返回格式：[{"id": 1, "content_status": "PENDING"}, ...]
         """
@@ -225,6 +291,13 @@ class ProjectService:
             project = await self.project_repo.get_project_by_id(project_id=project_id)
             if not project:
                 return BaseResponse.not_found(message=f"项目 ID {project_id} 不存在")
+
+            # 如果提供了user_id，验证项目是否属于该用户
+            if user_id and project.owner != user_id:
+                return BaseResponse.error(
+                    message="无权访问该项目",
+                    code=403
+                )
 
             # Get all leaf modules (POINT type)
             leaf_modules = await self.module_repo.get_leaf_modules(project_id=project_id)

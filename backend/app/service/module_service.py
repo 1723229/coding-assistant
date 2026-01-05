@@ -1830,7 +1830,7 @@ class ModuleService:
             yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)}'}, ensure_ascii=False)}\n\n"
 
     @log_print
-    async def create_modules_from_metadata(self, session_id: str):
+    async def create_modules_from_metadata(self, session_id: str, user_id: Optional[str] = None):
         """
         根据 METADATA.json 批量创建 project 和 modules
 
@@ -1842,6 +1842,7 @@ class ModuleService:
 
         Args:
             session_id: 会话ID
+            user_id: 用户ID（从JWT token中提取）
 
         Returns:
             BaseResponse with created project_id and module count
@@ -1882,11 +1883,12 @@ class ModuleService:
                     prd_session_id=session_id,
                     codebase=ProjectConfig.DEFAULT_CODEBASE,
                     token=ProjectConfig.DEFAULT_TOKEN,
+                    owner=user_id,  # 设置 owner 为从 JWT 提取的 user_id
                 )
 
                 project = await self.project_repo.create_project(data=project_data)
                 project_id = project.id
-                logger.info(f"Created project: {project_name} (id: {project_id})")
+                logger.info(f"Created project: {project_name} (id: {project_id}, owner: {user_id})")
 
             # 步骤3: 递归创建 modules
             created_modules = []

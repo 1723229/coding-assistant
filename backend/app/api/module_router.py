@@ -12,12 +12,13 @@ import asyncio
 import logging
 from typing import Optional
 from pathlib import Path as FilePath
-from fastapi import APIRouter, Query, Path, UploadFile, File, HTTPException, Body
+from fastapi import APIRouter, Query, Path, UploadFile, File, HTTPException, Body, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from app.service.module_service import ModuleService
 from app.db.schemas import ModuleCreate, ModuleUpdate
 from app.utils import BaseResponse
+from app.utils.auth.dependencies import get_optional_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -396,6 +397,7 @@ async def confirm_prd_stream(
 )
 async def create_modules_from_metadata(
     session_id: str = Query(..., description="会话ID"),
+    user_id: Optional[str] = Depends(get_optional_user_id),
 ):
     """
     从 METADATA.json 批量创建 project 和 modules
@@ -412,6 +414,7 @@ async def create_modules_from_metadata(
     - 只做入库操作，不拉取代码、不创建容器
     - 如果 project 或 module 已存在，则跳过创建
     - 使用普通 HTTP 接口，非 SSE 流
+    - 从 Authorization header 中提取 user_id 并设置为 project.owner
 
     返回:
     - project_id: 创建的项目ID
@@ -422,7 +425,7 @@ async def create_modules_from_metadata(
     示例:
     - session_id: "abc123"
     """
-    data =  await module_service.create_modules_from_metadata(session_id=session_id)
+    data =  await module_service.create_modules_from_metadata(session_id=session_id, user_id=user_id)
     return BaseResponse.success(
         data=data,
         message=f"成功创建项目和 {data.get('module_count')} 个模块"
