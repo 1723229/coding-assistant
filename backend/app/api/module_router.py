@@ -256,6 +256,7 @@ async def restart_module_container(
 async def upload_file_stream(
     file: UploadFile = File(..., description="上传的文件（支持 .docx, .md）"),
     session_id: str = Query(..., description="会话ID"),
+    user_id: Optional[str] = Depends(get_optional_user_id),
 ):
     """
     上传文件并流式处理PRD分解任务
@@ -282,7 +283,8 @@ async def upload_file_stream(
     return StreamingResponse(
         module_service.upload_file_and_create_module_stream(
             file=file,
-            session_id=session_id
+            session_id=session_id,
+            user_id=user_id
         ),
         media_type="text/event-stream",
         headers={

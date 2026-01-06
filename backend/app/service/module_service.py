@@ -1352,7 +1352,8 @@ class ModuleService:
     async def upload_file_and_create_module_stream(
         self,
         file: UploadFile,
-        session_id: str
+        session_id: str,
+        user_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """
         上传文件并流式处理PRD分解任务
@@ -1368,9 +1369,11 @@ class ModuleService:
         Args:
             file: 上传的文件
             session_id: 会话ID
+            user_id: ewf
 
         Yields:
             SSE格式的事件消息
+            :param user_id:
         """
         temp_file_path = None
 
@@ -1508,7 +1511,7 @@ class ModuleService:
                 return
 
             # 步骤6: 创建项目和节点
-            data = await self.create_modules_from_metadata(session_id=session_id)
+            data = await self.create_modules_from_metadata(session_id=session_id, user_id=user_id)
             result_data = {
                 'type': 'complete',
                 'message': 'PRD处理完成',
