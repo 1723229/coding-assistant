@@ -92,7 +92,7 @@ The test result file follows this schema:
   "groups": [
     {
       "nodeId": "string",
-      "status": "completed" | "error",
+      "status": "completed" | "error" | "init",
       "objective": "string",
       "error": "string | null",
       "steps": [
@@ -113,7 +113,7 @@ The test result file follows this schema:
 **Field Descriptions:**
 | Field | Description |
 |-------|-------------|
-| `status` | Overall test result: `error` (failed) or `completed` (passed) |
+| `status` | Overall test result: `error` (failed), `completed` (passed), or `init` (pending - not executed due to prior step failure) |
 | `caseName` | Test case name, used as default `fix-id` |
 | `testUrl` | Complete test URL (no need for address replacement) |
 | `expectedResult` | Expected validation results (multi-line assertions) |
