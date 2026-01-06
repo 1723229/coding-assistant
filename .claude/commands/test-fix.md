@@ -249,17 +249,18 @@ fix/{fix-id}/
 - No URL transformation needed - the URL is already correct
 - Example: `"testUrl": "http://127.0.0.1:3000/problem-closed-loop-management/problem-type-management"`
 
-**Expected Results**:
-- Use `expectedResult` field from test result JSON for validation criteria
+**Expected Results (PRIMARY SUCCESS CRITERIA)**:
+- Use `expectedResult` field from test result JSON as the **PRIMARY** validation criteria
 - Parse multi-line assertions (e.g., "1. 系统显示「编码已存在」提示\n2. 验证错误提示样式正确")
 - Each line represents a validation checkpoint to verify
+- **`expectedResult` determines final success/failure** - if all expected results pass, the fix is successful
 
 **Validation Requirements:**
-- **MUST follow the exact steps** defined in `groups[].steps[]` from the test result JSON
+- Follow the steps defined in `groups[].steps[]` from the test result JSON as guidance
 - Reproduce each step in order: read `stepDescription` and execute corresponding Playwright actions
-- Verify each step's expected outcome (element presence, text content, state changes)
-- **MUST verify expectedResult** after completing all steps
-- If any step or expected result fails, document the failure and capture screenshot
+- **If a step fails but `expectedResult` can still be verified** → Continue to verify expectedResult
+- **MUST verify expectedResult** - this is the ultimate success criteria
+- **Final status is based on `expectedResult` verification**, NOT on whether all steps completed
 - Capture final screenshot as validation proof
 
 **Steps:**
@@ -269,13 +270,14 @@ fix/{fix-id}/
    - Read `stepDescription` to understand the action
    - Use appropriate Playwright tools to perform the action (click, fill, evaluate, etc.)
    - Verify the step completed successfully
-   - **If step fails**: Capture failure screenshot → go to step 5 for analysis
+   - **If step fails**: Log the failure, but **continue to step 4** to verify expectedResult
    - If step has `screenshot`, optionally compare with original for reference
-4. **Verify expectedResult**: After all steps complete:
+4. **Verify expectedResult (PRIMARY CRITERIA)**: 
    - Parse `expectedResult` into individual assertions
    - Verify each assertion using Playwright (check text, element state, etc.)
-   - **If any assertion fails**: Document which assertion failed → go to step 5
-5. **On validation failure** (any step or assertion fails):
+   - **If ALL assertions pass** → Fix is **SUCCESS** (even if some steps failed)
+   - **If any assertion fails** → Document which assertion failed → go to step 5
+5. **On expectedResult verification failure**:
    - **Capture failure screenshot** with timestamp
    - **Collect logs**:
      - Browser console: `playwright_console_logs` (errors, warnings, console.log)
@@ -310,10 +312,11 @@ fix/{fix-id}/
      - Intermittent failure → Retry with same fix (increment `retryCount`)
      - `retryCount >= 3` → Phase 6 with failure status + detailed diagnosis
    - Return to **Phase 4: Restart** → **Phase 5: Validate** (retry)
-6. **On validation success** (all steps and assertions pass):
-   - Track validation results: Count total steps, passed steps, failed steps
-   - Capture screenshot for fixed success cases: `browser_snapshot` → `fix/{fix-id}/validation_pass.png`
-   - Update fix_result.json
+6. **On validation success** (all `expectedResult` assertions pass):
+   - Track validation results: Count total assertions, passed assertions
+   - Note: Some test steps may have failed, but if `expectedResult` passes, fix is successful
+   - Capture screenshot: `browser_snapshot` → `fix/{fix-id}/validation_pass.png`
+   - Update fix_result.json with `status: "success"`
    - Proceed to Phase 6
 
 ### Phase 6: Finalize
@@ -404,7 +407,7 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 3. Complete fix applied
 4. Service restarted
 5. Playwright validation executed
-6. All test steps passed (or failure documented)
+6. **`expectedResult` assertions verified** (this determines success/failure)
 7. `fix_result.json` exists and valid
 8. `validation_*.png` exists
 9. Output verification passed
@@ -471,7 +474,7 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 9. **Write Incrementally** - Update fix_result.json after each phase completion (Parse→Analyze→Fix→Restart→Validate→Finalize)
 10. **Prove with Artifacts** - Save all output files
 11. **Verify Output** - Check files exist before completing
-12. **Pass ALL Steps** - Every step must succeed
+12. **expectedResult is King** - Final success/failure is determined by `expectedResult` verification, not by test steps
 
 ---
 
