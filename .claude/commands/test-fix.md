@@ -312,7 +312,7 @@ fix/{fix-id}/
    - Return to **Phase 4: Restart** → **Phase 5: Validate** (retry)
 6. **On validation success** (all steps and assertions pass):
    - Track validation results: Count total steps, passed steps, failed steps
-   - Capture screenshot: `browser_snapshot` → `fix/{fix-id}/validation_pass.png`
+   - Capture screenshot for fixed success cases: `browser_snapshot` → `fix/{fix-id}/validation_pass.png`
    - Update fix_result.json
    - Proceed to Phase 6
 
