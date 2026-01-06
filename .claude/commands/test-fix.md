@@ -133,8 +133,8 @@ All artifacts are written to `fix/{fix-id}/`:
 ```
 fix/{fix-id}/
 ├── fix_result.json      # Complete fix metadata (updated incrementally)
-├── validation_pass.png  # Screenshot on success
-└── validation_fail.png  # Screenshot on failure
+├── validation_pass.png  # Screenshot showing expectedResult satisfied (on success)
+└── validation_fail.png  # Screenshot showing failure state (on failure)
 ```
 
 ### fix_result.json Incremental Write Specification
@@ -315,7 +315,10 @@ fix/{fix-id}/
 6. **On validation success** (all `expectedResult` assertions pass):
    - Track validation results: Count total assertions, passed assertions
    - Note: Some test steps may have failed, but if `expectedResult` passes, fix is successful
-   - Capture screenshot: `browser_snapshot` → `fix/{fix-id}/validation_pass.png`
+   - **Capture screenshot that demonstrates `expectedResult` is satisfied**:
+     - Screenshot MUST visually show the expected state (e.g., error message displayed, correct data shown)
+     - Save as `fix/{fix-id}/validation_pass.png`
+     - The screenshot should serve as proof that `expectedResult` assertions are met
    - Update fix_result.json with `status: "success"`
    - Proceed to Phase 6
 
@@ -447,7 +450,8 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 ### Playwright Validation
 - Wait for elements before interacting
 - Verify intermediate states
-- Capture proof screenshots
+- **Capture proof screenshots that show `expectedResult` is satisfied**
+- Success screenshot must visually demonstrate the expected outcome
 
 ### Failure Analysis
 - **Check logs**: Browser console, network, backend
@@ -493,8 +497,8 @@ Timing Issue → Add Synchronization → Restart → Playwright Validate
 ```
 fix/{fix-id}/
 ├── fix_result.json      # Fix metadata
-├── validation_pass.png  # Success screenshot
-└── validation_fail.png  # Failure screenshot (if failed)
+├── validation_pass.png  # Screenshot proving expectedResult is satisfied
+└── validation_fail.png  # Screenshot showing failure state (if failed)
 ```
 
 ### Phase Checklist
